@@ -121,6 +121,24 @@ test("every tool: name <= 64 chars, human-readable title, readOnlyHint true, no 
   }
 });
 
+test("every tool has a non-empty annotations.title equal to its title, and readOnlyHint true", async () => {
+  const { tools } = (await (await rpc({ method: "tools/list" })).json()).result;
+  const expected = {
+    check_einvoice_obligation: "Check Malaysia e-Invoice obligation",
+    draft_einvoice: "Draft Malaysia e-Invoice (MyInvois-ready)",
+    lookup_classification_code: "Find LHDN e-Invoice classification code",
+  };
+  assert.equal(tools.length, 3);
+  for (const t of tools) {
+    assert.equal(typeof t.annotations.title, "string", t.name);
+    assert.ok(t.annotations.title.trim().length > 0, `${t.name} annotations.title is empty`);
+    assert.equal(t.annotations.title, expected[t.name], t.name);
+    assert.equal(t.annotations.title, t.title, t.name);
+    assert.equal(t.annotations.readOnlyHint, true, t.name);
+    assert.equal(t.annotations.idempotentHint, true, t.name);
+  }
+});
+
 test("invalid tool input: specific message naming the field", async () => {
   const r = await call("check_einvoice_obligation", { annualTurnoverRM: -5 });
   assert.equal(r.isError, true);
