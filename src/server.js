@@ -51,6 +51,7 @@ export function buildServer() {
     sstNo: z.string().optional().describe("SST registration number, blank if not registered"),
     address: z.string().optional(), phone: z.string().optional(), email: z.string().optional(),
   };
+  // TODO: add optional id_type and invoice_type inputs after directory review.
   registerAppTool(server, "draft_einvoice", {
     title: "Draft Malaysia e-Invoice (MyInvois-ready)",
     description: "Use when the user wants to create, prepare or check an invoice for Malaysia's LHDN e-Invoice / MyInvois system. Builds the invoice with SST (sales tax / service tax) totals, suggests classification codes, and lists missing mandatory fields (TIN, BRN, MSIC, SST no.). Does not submit to LHDN.",
@@ -74,7 +75,7 @@ export function buildServer() {
   }, async (args) => {
     const r = draftInvoice(args);
     const t = r.invoice.totals;
-    return { structuredContent: r, content: [{ type: "text", text: `${r.readiness.summary} Total payable ${r.invoice.currency} ${t.payable.toFixed(2)} (tax ${t.tax.toFixed(2)}). Issues: ${r.readiness.issues.map((i) => `[${i.level}] ${i.msg}`).join("; ") || "none"}. ${r.nextStep}` }] };
+    return { structuredContent: r, content: [{ type: "text", text: `${r.readiness.summary} Total payable ${r.invoice.currency} ${t.payable.toFixed(2)} (tax ${t.tax.toFixed(2)}). Issues: ${r.readiness.issues.map((i) => `[${i.level}] ${i.msg}`).join("; ") || "none"}. ${r.generalTinNote} ${r.nextStep}` }] };
   });
 
   registerAppTool(server, "lookup_classification_code", {

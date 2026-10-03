@@ -3,8 +3,17 @@
 // - TAX_TYPES: https://sdk.myinvois.hasil.gov.my/codes/tax-types/
 // - CLASSIFICATION_CODES (001-045): https://sdk.myinvois.hasil.gov.my/codes/classification-codes/ (page dated 25 Sep 2026)
 // - Code list index: https://sdk.myinvois.hasil.gov.my/codes/
-// - GENERAL_TINS: e-Invoice Specific Guideline v4.8, Appendix 1 (per secondary sources; LHDN PDF still to check)
-//   (https://www.hasil.gov.my/en/e-invoice/)
+// - GENERAL_TINS, generalTinFor(), ID fill-ins: LHDN e-Invoice Specific Guideline v4.9 (published 7 Sep 2026)
+//   (https://www.hasil.gov.my/en/e-invoice/):
+//   Appendix 1  general TIN list (Appendix Table 1)
+//   Appendix 2  consolidated e-Invoice buyer details; Appendix 4  individual buyer details
+//   Table 3.3   individual buyer / shipping recipient: TIN only -> ID "000000000000"; ID only -> EI00000000010
+//   Table 3.4   consolidated self-billed e-Invoice: supplier "General Public", EI00000000010, MSIC "00000"
+//   Table 3.5   consolidated e-Invoice buyer details
+//   Table 3.6   item 7: no consolidation for a single transaction above RM10,000 (from 1 Jan 2026)
+//   Table 8.2   individual supplier in a self-billed e-Invoice: TIN-only / ID-only rule
+//   Table 10.1  foreign seller in a self-billed e-Invoice: EI00000000030
+//   Table 10.2  foreign buyer: EI00000000010 for MyPR/MyKAS, EI00000000020 for others
 // Phases, thresholds and SST rates: malaysia4u.com e-invoicing + SST guides, jomeinvoice.my RM10k rule guide
 // (not yet checked against LHDN).
 // Rules change. Every output tells the user to confirm on https://www.hasil.gov.my/en/e-invoice/
@@ -28,14 +37,96 @@ export const PHASES = [
   },
 ];
 export const EXEMPTION_THRESHOLD = 1_000_000; // raised from RM500k on 6 Dec 2025
-export const SINGLE_TXN_LIMIT = 10_000; // from 1 Jan 2026: any single txn >= RM10k needs its own e-invoice
+export const SINGLE_TXN_LIMIT = 10_000; // from 1 Jan 2026: any single txn >= RM10k needs its own e-invoice (Specific Guideline v4.9, Table 3.6 item 7)
 
+// General TINs — Specific Guideline v4.9, Appendix 1 (Appendix Table 1).
 export const GENERAL_TINS = {
-  EI00000000010: "General public: Malaysian individual who gives only MyKad/MyTentera; buyer's TIN on a consolidated e-Invoice; supplier's TIN on a consolidated self-billed e-Invoice",
-  EI00000000020: "Foreign buyer / shipping recipient: non-Malaysian individual with only passport/MyPR/MyKAS; export buyer or foreign shipping recipient whose TIN is unavailable",
-  EI00000000030: "Foreign supplier: foreign supplier whose TIN is unavailable (mainly self-billed)",
-  EI00000000040: "Government / authority buyer: government, state government or state authority, government authority, local authority, statutory authority or statutory body, and exempt institutions without a TIN",
+  EI00000000010: "General Public: Malaysian individual (supplier, buyer or shipping recipient) who gives only a MyKad/MyTentera number; non-Malaysian individual who gives only a MyPR/MyKAS number (ID number goes in the ID field); buyer's TIN on a consolidated e-Invoice; supplier's TIN on a consolidated self-billed e-Invoice",
+  EI00000000020: "Foreign Buyer / Foreign Shipping Recipient: non-Malaysian individual buyer who gives only a passport number (passport goes in the ID field); export where the foreign buyer's TIN is not available; foreign shipping recipient whose TIN is not available",
+  EI00000000030: "Foreign Supplier (self-billed e-Invoice only): non-Malaysian individual supplier who gives only a passport number; import where the foreign supplier's TIN is not available",
+  EI00000000040: "Buyer: Government; state government and state authority; exempt institutions not assigned a TIN; government authority; local authority; statutory authority and statutory body",
 };
+
+// Buyers that take EI00000000040 (v4.9 Appendix 1). All six must stay listed.
+export const GOVERNMENT_BUYER_CATEGORIES = [
+  "Government",
+  "State government and state authority",
+  "Exempt institution not assigned a TIN",
+  "Government authority",
+  "Local authority",
+  "Statutory authority and statutory body",
+];
+
+// ID-field fill-ins (v4.9 Appendix 1; Table 3.3 / Appendix 4 for individual buyers, Table 8.2 for self-billed suppliers).
+export const ID_TIN_ONLY = "000000000000"; // individual who gives only a TIN
+export const ID_NOT_AVAILABLE = "NA"; // foreign party without a business registration number; consolidated buyer
+
+// Is YYMMDD a real calendar date in 19YY or 20YY?
+function validYymmdd(d) {
+  const yy = Number(d.slice(0, 2)), mm = Number(d.slice(2, 4)), dd = Number(d.slice(4, 6));
+  if (mm < 1 || mm > 12 || dd < 1) return false;
+  return [1900, 2000].some((c) => dd <= new Date(Date.UTC(c + yy, mm, 0)).getUTCDate());
+}
+
+// What kind of ID number the ID/BRN field holds.
+// - "nric": 12 digits starting with a valid YYMMDD birth date. MyKad, MyTentera, MyPR and MyKAS share this
+//   format and all map to EI00000000010. (Place-of-birth digits 7-8 are not checked: no code list here.)
+// - "company": 12 digits that can't be a birth date (e.g. digits 3-4 not 01-12) — an SSM registration number
+//   (YYYY + 2-digit entity type + 6-digit running number).
+// - "nric-or-company": a valid birth date that could also be an SSM number from 1901-1912 / 2001-2012.
+// - "passport": 1-2 letters, 6-9 digits, optional trailing letter (e.g. A12345678, E1234567X).
+export function idKind(id) {
+  const v = String(id ?? "").trim().toUpperCase();
+  if (!v) return "none";
+  if (v === ID_NOT_AVAILABLE) return "na";
+  if (v === ID_TIN_ONLY) return "tin-only";
+  const digits = v.replace(/[-\s]/g, "");
+  if (/^\d{12}$/.test(digits)) {
+    if (!validYymmdd(digits)) return "company";
+    return /^(19|20)/.test(digits) ? "nric-or-company" : "nric";
+  }
+  if (/^[A-Z]{1,2}\d{6,9}[A-Z]?$/.test(v.replace(/\s/g, ""))) return "passport";
+  return "other";
+}
+
+const NRIC_TYPES = ["mykad", "mytentera", "mypr", "mykas", "nric", "nric-or-company"];
+
+// Which general TIN applies to a party that has no TIN of its own (v4.9 Appendix 1).
+// role: "buyer" | "supplier" | "shippingRecipient"
+// opts: idType ("mykad" | "mytentera" | "mypr" | "mykas" | "passport"; or pass id and it is detected),
+//       consolidated, selfBilled, export, import, foreign (shipping recipient), governmentCategory.
+// Returns { tin, id, rule } or { tin: null, rule } when no general TIN fits.
+export function generalTinFor(role, opts = {}) {
+  const { consolidated, export: isExport, import: isImport, foreign, governmentCategory } = opts;
+  const selfBilled = opts.selfBilled || isImport; // importation is always self-billed
+  const idType = String(opts.idType || idKind(opts.id)).toLowerCase();
+  const id = opts.id ? String(opts.id).trim() : undefined;
+
+  if (consolidated && role === "buyer") return /* Table 3.5, Appendix 2 */ { tin: "EI00000000010", id: ID_NOT_AVAILABLE, rule: "Buyer on a consolidated e-Invoice" };
+  if (consolidated && selfBilled && role === "supplier") return /* Table 3.4 */ { tin: "EI00000000010", id: ID_NOT_AVAILABLE, rule: "Supplier on a consolidated self-billed e-Invoice" };
+  // ID only: Table 3.3 (buyer / shipping recipient), Table 8.2 (self-billed supplier), Table 10.2 (MyPR/MyKAS).
+  if (NRIC_TYPES.includes(idType)) {
+    return { tin: "EI00000000010", id, rule: idType === "mypr" || idType === "mykas"
+      ? "Non-Malaysian individual who gives only a MyPR/MyKAS number"
+      : "Malaysian individual who gives only a MyKad/MyTentera number" };
+  }
+  if (idType === "company") return { tin: null, rule: "Malaysian businesses must provide their TIN and business registration number." };
+  // Passport only: Table 10.2 (foreign buyer -> 020), Table 10.1 (foreign seller, self-billed -> 030).
+  if (idType === "passport") {
+    if (role === "buyer" || role === "shippingRecipient") return { tin: "EI00000000020", id, rule: "Non-Malaysian individual who gives only a passport number" };
+    if (role === "supplier") return selfBilled
+      ? { tin: "EI00000000030", id, rule: "Non-Malaysian individual supplier who gives only a passport number (self-billed)" }
+      : { tin: null, rule: "EI00000000030 is only for a self-billed e-Invoice" };
+  }
+  if (role === "buyer" && governmentCategory) {
+    const hit = GOVERNMENT_BUYER_CATEGORIES.find((c) => c.toLowerCase() === String(governmentCategory).toLowerCase());
+    if (hit) return { tin: "EI00000000040", id: id || ID_NOT_AVAILABLE, rule: hit };
+  }
+  if (role === "buyer" && isExport) return { tin: "EI00000000020", id: id || ID_NOT_AVAILABLE, rule: "Export: foreign buyer's TIN not available" };
+  if (role === "shippingRecipient" && foreign) return { tin: "EI00000000020", id: id || ID_NOT_AVAILABLE, rule: "Foreign shipping recipient whose TIN is not available" };
+  if (role === "supplier" && isImport) return { tin: "EI00000000030", id: id || ID_NOT_AVAILABLE, rule: "Import: foreign supplier's TIN not available (self-billed)" };
+  return { tin: null, rule: "No general TIN applies — get the party's own TIN" };
+}
 
 // Industries that cannot use consolidated e-invoices even for B2C
 export const NO_CONSOLIDATION_INDUSTRIES = [
@@ -113,7 +204,8 @@ export const CLASSIFICATION_CODES = {
 };
 
 // Walk-in / general public buyer. LHDN e-Invoice Specific Guideline, Section 3 (Consolidated
-// e-Invoice) and Appendix 2 (Buyer's details in consolidated e-Invoice): these exact values.
+// e-Invoice), Table 3.5 and Appendix 2 (Buyer's details in consolidated e-Invoice): these exact values.
+// v4.9 Appendix 2 and Table 3.5: name "General Public", TIN EI00000000010, ID/address/contact/SST "NA".
 export const GENERAL_PUBLIC_BUYER = {
   name: "General Public", tin: "EI00000000010", brn: "NA", sstNo: "NA", address: "NA", phone: "NA",
 };
