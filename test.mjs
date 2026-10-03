@@ -1,0 +1,15 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+const c = new Client({ name: "t", version: "1" });
+await c.connect(new StreamableHTTPClientTransport(new URL(process.env.MCP_URL || "http://localhost:8787/mcp")));
+const tools = await c.listTools();
+for (const t of tools.tools) console.log("TOOL", t.name, JSON.stringify(t._meta));
+const res = await c.listResources(); console.log("RES", res.resources.map(r=>r.uri+" "+r.mimeType));
+const rr = await c.readResource({ uri: res.resources[0].uri }); console.log("HTML bytes", rr.contents[0].text.length, rr.contents[0].mimeType);
+const a = await c.callTool({ name: "check_einvoice_obligation", arguments: { annualTurnoverRM: 3000000, sellsToConsumers: true, industry: "F&B restaurant", sstRegistered: true } });
+console.log(a.content[0].text);
+const b = await c.callTool({ name: "draft_einvoice", arguments: { invoiceNo: "INV-2026-0042", supplier: { name: "Kedai Runcit Maju", tin: "IG12345678901", brn: "", msic: "4791", address: "Kajang" }, buyer: { name: "Walk-in" }, items: [{ description: "Car repair labour", unitPrice: 450 }, { description: "Brake pads", quantity: 2, unitPrice: 120, taxType: "01", taxRate: 10 }] } });
+console.log(b.content[0].text);
+const d = await c.callTool({ name: "lookup_classification_code", arguments: { query: "tuition" } });
+console.log(d.content[0].text.slice(0,200));
+await c.close();
