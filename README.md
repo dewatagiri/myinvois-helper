@@ -23,7 +23,7 @@ npm test           # unit tests: HTTP layer + rules (walk-in/foreign/B2B buyers,
 
 ## Rules baked in (as of Oct 2026 — re-check before launch)
 
-Last verified against LHDN SDK: 2026-10-03 (tax types and classification codes; general TINs per LHDN e-Invoice Specific Guideline v4.9, published 7 Sep 2026, Appendix 1 / Appendix Table 1; see also Tables 3.3, 3.5, 8.2, 10.1, 10.2).
+Last verified against LHDN SDK: 2026-10-03 (tax types and classification codes; general TINs per LHDN e-Invoice Specific Guideline v4.9, published 7 Sep 2026, Appendix 1 / Appendix Table 1; Tables 3.3, 3.4, 3.5, 3.6, 8.2, 10.1, 10.2; Appendices 2 and 4).
 
 - Exempt below RM1m turnover (raised from RM500k on 6 Dec 2025). Phase 4 (RM1m–5m) started 1 Jan 2026.
 - Any single transaction ≥ RM10,000 needs its own e-invoice from 1 Jan 2026.
@@ -34,6 +34,7 @@ Last verified against LHDN SDK: 2026-10-03 (tax types and classification codes; 
   - EI00000000030 Foreign Supplier, self-billed only: passport-only individual supplier; import with no TIN.
   - EI00000000040 Buyer: Government; state government and state authority; exempt institutions not assigned a TIN; government authority; local authority; statutory authority and statutory body.
   - ID field: "000000000000" if an individual gives only a TIN; "NA" if a foreign party has no business registration number.
+  - A 12-digit number that can't be a birth date (YYMMDD) is treated as an SSM registration number: no general TIN is applied and the user is told to get the business's TIN.
 - SST: service tax 8% (6% for F&B, telco, parking, logistics); sales tax 10% / 5%.
 - 45 classification codes and 7 tax type codes from the LHDN MyInvois SDK.
 

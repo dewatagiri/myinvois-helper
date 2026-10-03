@@ -1,7 +1,7 @@
 // Rule tests. Run: npm test  (uses Node's built-in test runner, no extra packages)
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { draftInvoice, lookupCodes, checkObligation, blockedIndustry, isWalkIn } from "../src/logic.js";
+import { draftInvoice, lookupCodes, checkObligation, blockedIndustry, isWalkIn, GENERAL_TIN_NOTE } from "../src/logic.js";
 import { GENERAL_TINS, TAX_TYPES, checkTin, classify, generalTinFor, idKind, GOVERNMENT_BUYER_CATEGORIES, ID_TIN_ONLY } from "../src/rules.js";
 
 const SUPPLIER = { name: "Kedai Maju Sdn Bhd", tin: "C2584563201", brn: "202001012345", msic: "47910", activity: "Retail", address: "Kajang, Selangor", phone: "0123456789", sstNo: "W10-1808-32000001" };
@@ -367,5 +367,63 @@ describe("general TINs — LHDN Specific Guideline v4.9, Appendix 1", () => {
       assert.ok(!/v4\.8/.test(t), f + " still mentions v4.8");
       assert.ok(!/still to check/i.test(t), f + " still has a 'still to check' note");
     }
+  });
+});
+
+describe("12-digit ID: individual (MyKad/MyTentera/MyPR/MyKAS) vs SSM company number", () => {
+  // a. digits 3-4 not a month -> SSM number
+  for (const n of ["202001012345", "201901000123", "199701001234", "202503067890"]) {
+    test(`a: ${n} (digits 3-4 not 01-12) is an SSM number, not an individual ID`, () => {
+      assert.equal(idKind(n), "company");
+    });
+  }
+  test("a: an impossible birth date (31 Feb, 29 Feb in a non-leap year) is not an individual ID", () => {
+    assert.equal(idKind("900231145678"), "company");
+    assert.equal(idKind("010229145678"), "company");
+    assert.equal(idKind("000229145678"), "nric"); // 29 Feb 2000 is real
+  });
+  test("a valid birth date not starting 19/20 is an individual ID", () => {
+    assert.equal(idKind("900101-14-5678"), "nric");
+    assert.equal(idKind("850505105555"), "nric");
+  });
+
+  // c. company number + no TIN -> no EI00000000010, warn
+  test("c: buyer with an SSM number and no TIN does NOT get EI00000000010 and is warned", () => {
+    const r = draft({ name: "ABC Trading Sdn Bhd", brn: "202001012345", address: "Shah Alam" });
+    assert.notEqual(r.invoice.buyer.tin, "EI00000000010");
+    assert.equal(r.invoice.buyer.tin, "");
+    assert.equal(r.invoice.buyer.brn, "202001012345");
+    assert.match(issue(r, "buyer.tin", "warn").msg, /^Malaysian businesses must provide their TIN and business registration number\./);
+  });
+  test("c: generalTinFor gives no general TIN for an SSM number", () => {
+    const g = generalTinFor("buyer", { id: "201901000123" });
+    assert.equal(g.tin, null);
+    assert.equal(g.rule, "Malaysian businesses must provide their TIN and business registration number.");
+  });
+
+  // d. ambiguous -> keep EI00000000010 but say it was assumed
+  test("d: 200101145678 could be an IC (born 1 Jan 2020) or an SSM number (2001, type 01)", () => {
+    assert.equal(idKind("200101145678"), "nric-or-company");
+  });
+  test("d: ambiguous number + no TIN: EI00000000010 kept, with an 'assumed individual' note", () => {
+    const r = draft({ name: "Aiman", brn: "200101145678", address: "Kajang" });
+    assert.equal(r.invoice.buyer.tin, "EI00000000010");
+    assert.equal(r.invoice.buyer.brn, "200101145678");
+    assert.match(issue(r, "buyer.brn", "info").msg, /assumed to be an individual ID/);
+  });
+  test("a clear individual ID gets no 'assumed' note", () => {
+    const r = draft({ name: "Ahmad", brn: "900101145678", address: "Kajang" });
+    assert.equal(issue(r, "buyer.brn"), undefined);
+  });
+  test("ambiguous number with EI00000000020 is still an error", () => {
+    assert.ok(issue(draft({ name: "X", tin: "EI00000000020", brn: "200101145678", address: "Y" }), "buyer.tin", "error"));
+  });
+});
+
+describe("drafting tool output: general TIN note", () => {
+  test("every draft carries the self-billed / export / import / government note", () => {
+    const r = draft({ name: "Walk-in" });
+    assert.equal(r.generalTinNote, GENERAL_TIN_NOTE);
+    assert.equal(GENERAL_TIN_NOTE, "Self-billed, export, import and government invoices use different general TINs (EI00000000030, EI00000000020, EI00000000040) — see LHDN e-Invoice Specific Guideline v4.9, Appendix 1.");
   });
 });
