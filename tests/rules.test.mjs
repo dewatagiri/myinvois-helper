@@ -427,3 +427,22 @@ describe("drafting tool output: general TIN note", () => {
     assert.equal(GENERAL_TIN_NOTE, "Self-billed, export, import and government invoices use different general TINs (EI00000000030, EI00000000020, EI00000000040) — see LHDN e-Invoice Specific Guideline v4.9, Appendix 1.");
   });
 });
+
+describe("RM10,000 single-transaction rule (Specific Guideline v4.9, Table 3.6 item 7: \"exceeding RM10,000\")", () => {
+  const at = (amount) => draft({ name: "Walk-in" }, [{ description: "Laptop", unitPrice: amount, taxType: "06" }]);
+  test("RM10,000.00 -> consolidation still allowed", () => {
+    const r = at(10000);
+    assert.equal(r.invoice.totals.payable, 10000);
+    assert.equal(issue(r, "totals"), undefined);
+  });
+  test("RM10,000.01 -> individual e-invoice required", () => {
+    const r = at(10000.01);
+    assert.equal(r.invoice.totals.payable, 10000.01);
+    assert.match(issue(r, "totals", "info").msg, /^Above RM10,000: must be issued as an individual e-invoice/);
+  });
+  test("user-facing wording says 'above RM10,000', not 'or more'", () => {
+    const text = JSON.stringify([at(10000.01), checkObligation({ annualTurnoverRM: 3000000, sellsToConsumers: true })]);
+    assert.ok(!/or more/.test(text), "found 'or more'");
+    assert.match(text, /above RM10,000/i);
+  });
+});

@@ -26,7 +26,7 @@ npm test           # unit tests: HTTP layer + rules (walk-in/foreign/B2B buyers,
 Last verified against LHDN SDK: 2026-10-03 (tax types and classification codes; general TINs per LHDN e-Invoice Specific Guideline v4.9, published 7 Sep 2026, Appendix 1 / Appendix Table 1; Tables 3.3, 3.4, 3.5, 3.6, 8.2, 10.1, 10.2; Appendices 2 and 4).
 
 - Exempt below RM1m turnover (raised from RM500k on 6 Dec 2025). Phase 4 (RM1m–5m) started 1 Jan 2026.
-- Any single transaction ≥ RM10,000 needs its own e-invoice from 1 Jan 2026.
+- Any single transaction above RM10,000 (i.e. more than RM10,000.00) needs its own e-invoice from 1 Jan 2026 (Specific Guideline v4.9, Table 3.6 item 7).
 - Walk-in buyer: name "General Public", TIN EI00000000010, ID/SST/address/contact "NA" (LHDN e-Invoice Specific Guideline, Appendix 2).
 - General TINs (v4.9 Appendix 1):
   - EI00000000010 General Public: individual who gives only MyKad/MyTentera (Malaysian) or MyPR/MyKAS (non-Malaysian), ID number in the ID field; buyer on a consolidated e-invoice; supplier on a consolidated self-billed e-invoice.

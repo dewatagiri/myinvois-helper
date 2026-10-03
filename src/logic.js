@@ -28,7 +28,7 @@ export function checkObligation({ annualTurnoverRM, sellsToConsumers = false, in
     headline = `Mandatory. You fall under Phase ${p.phase} (start ${p.start}).`;
     actions.push(
       "Register on the MyInvois Portal and get your TIN, BRN, MSIC code and (if any) SST number ready.",
-      `Any single transaction of ${rm(SINGLE_TXN_LIMIT)} or more needs its own e-invoice — it cannot go into a monthly consolidated e-invoice.`,
+      `Any single transaction above ${rm(SINGLE_TXN_LIMIT)} needs its own e-invoice — it cannot go into a monthly consolidated e-invoice.`,
       "Collect buyer TIN + BRN for B2B sales. Validation returns a UIN and QR code; buyer has 72 hours to reject, after that use credit/debit notes.",
     );
     if (p.phase === 4) actions.push(p.note);
@@ -121,7 +121,7 @@ export function draftInvoice(input) {
     outBuyer = { ...buyer, ...GENERAL_PUBLIC_BUYER };
     if (!blank(buyer.email)) outBuyer.email = buyer.email;
     add("info", "buyer", 'Walk-in / general public buyer: filled as LHDN Specific Guideline v4.9 Appendix 2 / Table 3.5 requires (name "General Public", TIN EI00000000010, ID/SST/address/contact "NA"). No buyer address needed.');
-    add("info", "buyer", "If this customer doesn't ask for an e-invoice, you can include the sale in your monthly consolidated e-invoice (classification 004) instead, unless it is RM10,000 or more or your industry cannot consolidate.");
+    add("info", "buyer", "If this customer doesn't ask for an e-invoice, you can include the sale in your monthly consolidated e-invoice (classification 004) instead, unless it is above RM10,000 or your industry cannot consolidate.");
   } else {
     for (const f of BUYER_REQUIRED) if (blank(buyer[f])) add("error", `buyer.${f}`, `Buyer ${f.toUpperCase()} is required`);
     // General TINs and ID fill-ins: LHDN e-Invoice Specific Guideline v4.9, Appendix 1, Table 3.3, Table 10.2, Appendix 4.
@@ -195,7 +195,8 @@ export function draftInvoice(input) {
   };
   totals.payable = round2(totals.excludingTax + totals.tax);
 
-  if (totals.payable >= 10_000) add("info", "totals", "RM10,000 or more: must be issued as an individual e-invoice (cannot be consolidated).");
+  // Table 3.6 item 7: "exceeding RM10,000" — exactly RM10,000.00 can still be consolidated.
+  if (totals.payable > SINGLE_TXN_LIMIT) add("info", "totals", "Above RM10,000: must be issued as an individual e-invoice (cannot be consolidated).");
   if (currency !== "MYR") add("warn", "currency", "Non-MYR invoice: include the exchange rate to MYR.");
 
   const errors = issues.filter((x) => x.level === "error").length;

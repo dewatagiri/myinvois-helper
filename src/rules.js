@@ -37,7 +37,7 @@ export const PHASES = [
   },
 ];
 export const EXEMPTION_THRESHOLD = 1_000_000; // raised from RM500k on 6 Dec 2025
-export const SINGLE_TXN_LIMIT = 10_000; // from 1 Jan 2026: any single txn >= RM10k needs its own e-invoice (Specific Guideline v4.9, Table 3.6 item 7)
+export const SINGLE_TXN_LIMIT = 10_000; // from 1 Jan 2026: any single txn above (strictly > ) RM10,000 needs its own e-invoice — "exceeding RM10,000" (Specific Guideline v4.9, Table 3.6 item 7)
 
 // General TINs — Specific Guideline v4.9, Appendix 1 (Appendix Table 1).
 export const GENERAL_TINS = {
