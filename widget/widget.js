@@ -45,7 +45,8 @@ function renderObligation(d) {
 
 function renderCodes(d) {
   root.innerHTML = `<div class="title">Classification codes${d.query ? ` for “${esc(d.query)}”` : ""}</div>
-    ${d.suggested ? `<p class="big">Suggested: <b>${d.suggested.code}</b> — ${esc(d.suggested.description)}</p>` : ""}
+    ${d.suggested ? `<p class="big">Suggested: <b>${d.suggested.code}</b> — ${esc(d.suggested.description)}</p>` : (d.candidates && d.candidates.length ? `<p class="big">Not sure — top candidates below. Confirm with LHDN.</p>` : "")}
+    ${d.note ? `<p>${esc(d.note)}</p>` : ""}
     <table><tbody>${d.matches.map((m) => `<tr><td><b>${m.code}</b></td><td>${esc(m.description)}</td></tr>`).join("")}</tbody></table>
     <div class="foot">Source: LHDN MyInvois SDK code list.</div>`;
 }

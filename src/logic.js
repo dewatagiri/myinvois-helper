@@ -1,7 +1,7 @@
 import {
   PHASES, EXEMPTION_THRESHOLD, SINGLE_TXN_LIMIT, NO_CONSOLIDATION_INDUSTRIES,
   CLASSIFICATION_CODES, TAX_TYPES, SST_HINTS, GENERAL_TINS, OFFICIAL_LINKS, RULES_AS_OF,
-  suggestClassification, checkTin,
+  GENERAL_PUBLIC_BUYER, classify, normalize, hasPhrase, checkTin,
 } from "./rules.js";
 
 const rm = (n) => "RM" + Number(n).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -34,10 +34,7 @@ export function checkObligation({ annualTurnoverRM, sellsToConsumers = false, in
     if (p.phase === 4) actions.push(p.note);
   }
 
-  const ind = industry.toLowerCase();
-  const BLOCK_WORDS = { automotive: ["car", "motor", "vehicle", "automotive"], aviation: ["airline", "aviation", "flight"], luxury: ["luxury", "jewel", "jewellery", "watch"], construction: ["construction", "contractor", "builder"] };
-  const hit = Object.entries(BLOCK_WORDS).find(([, ws]) => ind && ws.some((w) => new RegExp(`\\b${w}`).test(ind)));
-  const blocked = hit ? NO_CONSOLIDATION_INDUSTRIES.find((x) => x.startsWith(hit[0])) : null;
+  const blocked = blockedIndustry(industry);
   if (status === "mandatory" && sellsToConsumers) {
     actions.push(
       blocked
@@ -56,9 +53,41 @@ export function checkObligation({ annualTurnoverRM, sellsToConsumers = false, in
   };
 }
 
+// Which no-consolidation industry (if any) the free-text industry falls into. Whole words only,
+// BM + English. Car repair / rental / wash / parts are NOT "sale of motor vehicles".
+const BLOCK_WORDS = {
+  aviation: ["airline", "aviation", "flight", "penerbangan", "air ticket", "tiket penerbangan"],
+  luxury: ["luxury", "jewellery", "jewelry", "jeweller", "jeweler", "barang kemas", "kedai emas", "emas", "luxury watch"],
+  construction: ["construction", "contractor", "kontraktor", "builder", "pembinaan"],
+};
+const VEHICLE_WORDS = ["car", "kereta", "motor vehicle", "vehicle", "kenderaan", "automotive", "automobile", "motorcycle", "motosikal"];
+const VEHICLE_SALE_WORDS = ["car dealer", "used car", "jual kereta", "kereta terpakai", "pengedar kereta", "showroom", "dealer", "pengedar"];
+const VEHICLE_SERVICE_WORDS = ["repair", "workshop", "bengkel", "servis", "service", "wash", "cuci", "rental", "sewa", "parts", "spare parts", "alat ganti", "tyre", "tayar", "accessories", "aksesori"];
+export function blockedIndustry(industry = "") {
+  const d = normalize(industry);
+  const any = (ws) => ws.some((w) => hasPhrase(d, w));
+  let hit = Object.keys(BLOCK_WORDS).find((k) => any(BLOCK_WORDS[k]));
+  if (!hit && any(VEHICLE_WORDS) && (any(VEHICLE_SALE_WORDS) || !any(VEHICLE_SERVICE_WORDS))) hit = "automotive";
+  return hit ? NO_CONSOLIDATION_INDUSTRIES.find((x) => x.startsWith(hit)) : null;
+}
+
 // ---------- Tool 2: Draft an e-invoice and check it ----------
 const SUPPLIER_REQUIRED = ["name", "tin", "brn", "msic", "activity", "address", "phone"];
 const BUYER_REQUIRED = ["name", "address"];
+// A buyer name made only of these words is a placeholder ("Walk-in customer", "Pelanggan tunai", "N/A").
+const WALK_IN_WORDS = new Set(["walk", "in", "walkin", "general", "public", "umum", "orang", "awam", "ramai", "cash", "customer", "customers",
+  "sale", "sales", "pelanggan", "tunai", "jualan", "consolidated", "buyer", "buyers", "n", "a", "na", "tiada", "none", "nil"]);
+const blank = (v) => v === undefined || v === null || String(v).trim() === "";
+
+// Walk-in = no real identity given: no TIN (or the general public TIN) AND no IC/BRN AND the name is
+// blank or a placeholder like "Walk-in" / "Orang awam".
+export function isWalkIn(buyer = {}) {
+  const tin = String(buyer.tin || "").trim().toUpperCase();
+  if (tin && tin !== GENERAL_PUBLIC_BUYER.tin) return false;
+  if (!blank(buyer.brn) && String(buyer.brn).trim().toUpperCase() !== "NA") return false;
+  const words = normalize(buyer.name).trim().split(" ").filter(Boolean);
+  return words.every((w) => WALK_IN_WORDS.has(w));
+}
 
 export function draftInvoice(input) {
   const { supplier = {}, buyer = {}, items = [], invoiceNo, issueDate, currency = "MYR", notes = "" } = input;
@@ -70,11 +99,30 @@ export function draftInvoice(input) {
   if (supplier.msic && !/^\d{5}$/.test(String(supplier.msic))) add("error", "supplier.msic", "MSIC code must be 5 digits (e.g. 47910)");
   if (!supplier.sstNo) add("info", "supplier.sstNo", 'No SST number — will show "NA" (fine if not SST-registered)');
 
-  for (const f of BUYER_REQUIRED) if (!buyer[f]) add("error", `buyer.${f}`, `Buyer ${f.toUpperCase()} is required`);
-  let buyerTin = buyer.tin;
-  if (!buyerTin) { buyerTin = "EI00000000010"; add("warn", "buyer.tin", "No buyer TIN — using general public TIN EI00000000010. For B2B, get the buyer's real TIN."); }
-  else { const c = checkTin(buyerTin); if (!c.ok) add("error", "buyer.tin", c.msg); }
-  if (!buyer.brn && !GENERAL_TINS[String(buyerTin).toUpperCase()]) add("warn", "buyer.brn", "Buyer BRN / IC / passport number missing");
+  let outBuyer;
+  const walkIn = isWalkIn(buyer);
+  if (walkIn) {
+    // LHDN Specific Guideline, Appendix 2: General Public / EI00000000010 / NA for ID, SST, address, contact.
+    outBuyer = { ...buyer, ...GENERAL_PUBLIC_BUYER };
+    if (!blank(buyer.email)) outBuyer.email = buyer.email;
+    add("info", "buyer", 'Walk-in / general public buyer: filled as LHDN Specific Guideline Appendix 2 requires (name "General Public", TIN EI00000000010, ID/SST/address/contact "NA"). No buyer address needed.');
+    add("info", "buyer", "If this customer doesn't ask for an e-invoice, you can include the sale in your monthly consolidated e-invoice (classification 004) instead, unless it is RM10,000 or more or your industry cannot consolidate.");
+  } else {
+    for (const f of BUYER_REQUIRED) if (blank(buyer[f])) add("error", `buyer.${f}`, `Buyer ${f.toUpperCase()} is required`);
+    let tin = String(buyer.tin || "").trim().toUpperCase();
+    const id = String(buyer.brn || "").trim();
+    if (!tin) {
+      tin = GENERAL_PUBLIC_BUYER.tin;
+      if (/^\d{12}$/.test(id.replace(/-/g, ""))) add("info", "buyer.tin", "Individual buyer gave MyKad/MyTentera but no TIN — using general TIN EI00000000010 with their IC number (LHDN allows this).");
+      else add("warn", "buyer.tin", "No buyer TIN — using general TIN EI00000000010. For a business buyer, get their real TIN; for an individual, add their 12-digit MyKad number as BRN.");
+    } else {
+      const c = checkTin(tin); if (!c.ok) add("error", "buyer.tin", c.msg);
+    }
+    if (tin === "EI00000000030") add("error", "buyer.tin", "EI00000000030 is for a foreign SUPPLIER in a self-billed e-invoice, not for a buyer. Use EI00000000020 for a foreign buyer.");
+    if (tin === "EI00000000020" && blank(id)) add("warn", "buyer.brn", "Foreign buyer: put their passport number or foreign business registration number as BRN.");
+    else if (blank(id) && !GENERAL_TINS[tin]) add("warn", "buyer.brn", "Buyer BRN / IC / passport number missing");
+    outBuyer = { ...buyer, tin, sstNo: buyer.sstNo || "NA" };
+  }
 
   if (!invoiceNo) add("error", "invoiceNo", "Invoice number is required");
   if (!items.length) add("error", "items", "At least one line item is required");
@@ -87,8 +135,11 @@ export function draftInvoice(input) {
     const taxType = it.taxType || (supplier.sstNo ? "02" : "06");
     const rate = taxType === "06" || taxType === "E" ? 0 : Number(it.taxRate ?? (taxType === "01" ? 10 : 8));
     const tax = round2(subtotal * rate / 100);
-    const code = it.classificationCode || suggestClassification(it.description);
-    if (!it.classificationCode) add("info", `items[${i}].classificationCode`, `Suggested classification ${code} (${CLASSIFICATION_CODES[code]}) — confirm`);
+    const guess = it.classificationCode ? null : classify(it.description);
+    const code = it.classificationCode || guess.code;
+    if (guess) add("info", `items[${i}].classificationCode`, guess.confident
+      ? `Suggested classification ${code} (${CLASSIFICATION_CODES[code]}) — confirm`
+      : `Classification unclear — using ${code} (${CLASSIFICATION_CODES[code]}) for now; other candidates: ${guess.candidates.filter((c) => c !== code).join(", ") || "see full list"}. ${guess.note}`);
     if (!CLASSIFICATION_CODES[code]) add("error", `items[${i}].classificationCode`, `Unknown classification code ${code}`);
     if (!TAX_TYPES[taxType]) add("error", `items[${i}].taxType`, `Unknown tax type ${taxType}`);
     if (taxType !== "06" && taxType !== "E" && !supplier.sstNo) add("warn", `items[${i}].taxType`, "SST charged but supplier has no SST number");
@@ -120,7 +171,7 @@ export function draftInvoice(input) {
       issueDate: issueDate || new Date().toISOString().slice(0, 10),
       currency,
       supplier: { ...supplier, sstNo: supplier.sstNo || "NA" },
-      buyer: { ...buyer, tin: buyerTin, sstNo: buyer.sstNo || "NA" },
+      buyer: outBuyer,
       lines, totals, notes,
     },
     readiness: {
@@ -140,15 +191,36 @@ export function draftInvoice(input) {
 
 // ---------- Tool 3: Look up classification codes ----------
 export function lookupCodes({ query = "" }) {
-  const q = query.toLowerCase().trim();
-  const all = Object.entries(CLASSIFICATION_CODES).map(([code, desc]) => ({ code, description: desc }));
-  const matches = q ? all.filter((x) => x.code === q || x.description.toLowerCase().includes(q)) : [];
-  let suggested = q ? suggestClassification(q) : null;
-  if (suggested === "022" && matches.length) suggested = null; // a real match beats "Others"
+  const q = query.trim();
+  const entry = (code) => ({ code, description: CLASSIFICATION_CODES[code] });
+  const all = Object.keys(CLASSIFICATION_CODES).map(entry);
+  if (!q) return { query, matches: all, suggested: null, candidates: [], confident: false, note: null, taxTypeHint: null, taxTypes: TAX_TYPES, source: OFFICIAL_LINKS.sdkCodes };
+
+  // Exact code ("025") or a whole-phrase hit on an official description ("motor vehicle").
+  const direct = all.filter((x) => x.code === q || hasPhrase(normalize(x.description), normalize(q).trim()));
+  const g = classify(q);
+  let suggested, candidates, confident = g.confident, note = g.note;
+  if (g.keyword) {
+    candidates = g.candidates.map(entry);
+    suggested = g.confident ? entry(g.code) : null; // unclear -> no single answer, show candidates
+  } else if (direct.length) {
+    candidates = direct;
+    suggested = direct.length === 1 ? direct[0] : null;
+    confident = direct.length === 1;
+    note = g.taxType ? g.note : (confident ? null : "Several official codes match — pick the one that fits, or confirm with LHDN.");
+  } else {
+    candidates = [entry("022")];
+    suggested = entry("022");
+  }
+
   return {
     query,
-    matches: matches.length ? matches : (suggested && suggested !== "022" ? [{ code: suggested, description: CLASSIFICATION_CODES[suggested] }] : all),
-    suggested: suggested ? { code: suggested, description: CLASSIFICATION_CODES[suggested] } : null,
+    suggested,
+    candidates,
+    confident,
+    note,
+    matches: g.keyword || direct.length ? candidates : all,
+    taxTypeHint: g.taxType ? { code: g.taxType, name: TAX_TYPES[g.taxType] } : null,
     taxTypes: TAX_TYPES,
     source: OFFICIAL_LINKS.sdkCodes,
   };

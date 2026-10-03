@@ -106,32 +106,97 @@ export const CLASSIFICATION_CODES = {
   "045": "Self-billed - Non-monetary payment to agents, dealers or distributors",
 };
 
-// Keyword hints so the tool can suggest a code from a plain-language item description
-const CODE_KEYWORDS = [
-  ["030", ["repair", "maintenance", "servicing", "service charge for repair"]],
-  ["028", ["car rental", "vehicle rental", "lorry rental"]],
-  ["003", ["laptop", "computer", "smartphone", "phone", "tablet", "ipad", "pc"]],
-  ["005", ["cement", "brick", "sand", "steel bar", "tiles", "construction material"]],
-  ["008", ["shopee", "lazada", "tiktok shop", "online order", "e-commerce", "ecommerce"]],
-  ["010", ["tuition", "course fee", "school fee", "education", "class fee"]],
-  ["013", ["gym", "fitness membership"]],
-  ["016", ["interest", "financing", "profit charge", "loan charge"]],
-  ["017", ["internet", "broadband", "wifi", "fibre"]],
-  ["018", ["land", "building", "property", "rent of premises", "office rental"]],
-  ["025", ["car", "motorcycle", "motor vehicle", "lorry", "van"]],
-  ["027", ["reimburse"]],
-  ["031", ["research", "r&d"]],
-  ["044", ["voucher", "gift card", "loyalty point"]],
-  ["007", ["donation", "sumbangan", "derma"]],
-  ["006", ["disbursement"]],
+// Walk-in / general public buyer. LHDN e-Invoice Specific Guideline, Section 3 (Consolidated
+// e-Invoice) and Appendix 2 (Buyer's details in consolidated e-Invoice): these exact values.
+export const GENERAL_PUBLIC_BUYER = {
+  name: "General Public", tin: "EI00000000010", brn: "NA", sstNo: "NA", address: "NA", phone: "NA",
+};
+
+// Text helpers: lower-case, punctuation to spaces, so "e-commerce" -> "e commerce".
+export const normalize = (s = "") => " " + String(s).toLowerCase().replace(/[^a-z0-9&]+/g, " ").trim() + " ";
+// Whole-word / whole-phrase match on normalized text ("car" never matches "baucar" or "carpet").
+// A trailing English plural "s" is allowed ("laptops", "repairs").
+export function hasPhrase(norm, phrase) {
+  const p = normalize(phrase).trim();
+  return norm.includes(` ${p} `) || norm.includes(` ${p}s `);
+}
+
+// Keyword hints so the tool can suggest a code from a plain-language item description (BM + English).
+// Matching: whole words only. The longest matching phrase wins ("sewa kereta" beats "sewa");
+// on a tie the rule listed first wins. Rules with `candidates` mean "genuinely unclear".
+const CODE_RULES = [
+  { candidates: ["022", "037"], words: ["komisen", "komisyen", "commission"],
+    note: "Commission you RECEIVE (you invoice the payer): usually 022 Others. Commission you PAY to agents/dealers: 037 self-billed. Confirm with LHDN." },
+  { code: "022", words: ["team building", "insurans kereta", "insurans motor", "car insurance", "motor insurance", "general insurance", "insurans am", "service charge", "caj perkhidmatan"] },
+  { code: "029", words: ["ev charging", "ev charger", "pengecas ev", "caj ev"] },
+  { code: "030", words: ["repair", "maintenance", "servicing", "servis", "baiki", "membaiki", "pembaikan", "penyelenggaraan", "selenggara", "overhaul",
+    "car service", "aircond service", "aircon service", "service aircond", "service aircon", "service kereta", "tukar minyak hitam"] },
+  { code: "028", words: ["car rental", "vehicle rental", "lorry rental", "van rental", "rent a car", "sewa kereta", "kereta sewa", "sewa lori", "sewa van", "sewa kenderaan", "sewa motosikal"] },
+  { code: "038", words: ["futsal", "badminton", "sewa gelanggang", "gelanggang", "sports equipment", "peralatan sukan", "competition registration", "yuran pertandingan", "sports training", "latihan sukan", "sukan", "sport"] },
+  { code: "002", words: ["tadika", "taska", "kindergarten", "childcare", "child care", "nursery", "pusat jagaan kanak kanak"] },
+  { code: "010", words: ["tuition", "tuisyen", "course fee", "yuran kursus", "school fee", "yuran sekolah", "education", "pendidikan", "class fee", "yuran kelas", "kelas tambahan", "yuran pengajian"] },
+  { code: "013", words: ["gym", "gim", "fitness membership", "keahlian gim"] },
+  { code: "041", words: ["dental", "dentist", "gigi", "doktor gigi"] },
+  { code: "020", words: ["vaccination", "vaccine", "vaksin", "medical checkup", "medical check up", "pemeriksaan perubatan"] },
+  { code: "015", words: ["takaful", "life insurance", "insurans hayat"] },
+  { code: "003", words: ["laptop", "computer", "komputer", "smartphone", "handphone", "mobile phone", "phone", "telefon bimbit", "telefon pintar", "tablet", "ipad", "iphone", "pc", "desktop"] },
+  { code: "005", words: ["cement", "simen", "brick", "bata", "sand", "pasir", "steel bar", "besi bar", "tiles", "jubin", "construction material", "bahan binaan"] },
+  { code: "008", words: ["shopee", "lazada", "tiktok shop", "online order", "e commerce", "ecommerce", "jualan online"] },
+  { code: "016", words: ["interest", "financing", "profit charge", "loan charge", "faedah", "pembiayaan", "caj pinjaman", "faedah pinjaman"] },
+  { code: "017", words: ["internet", "broadband", "wifi", "fibre", "unifi"] },
+  { code: "044", words: ["voucher", "baucar", "gift card", "kad hadiah", "loyalty point", "mata ganjaran"] },
+  { code: "018", words: ["land", "tanah", "building", "bangunan", "property", "hartanah", "premis", "rent of premises", "office rental", "shop rental",
+    "sewa kedai", "sewa pejabat", "sewa premis", "sewa rumah", "sewa bilik", "sewa tanah", "rumah kedai"] },
+  { code: "025", words: ["car", "kereta", "motorcycle", "motosikal", "motor vehicle", "kenderaan", "lorry", "lori", "van"] },
+  { code: "027", words: ["reimburse", "reimbursement", "tuntutan balik"] },
+  { code: "031", words: ["research", "r&d", "penyelidikan"] },
+  { code: "007", words: ["donation", "sumbangan", "derma"] },
+  { code: "006", words: ["disbursement"] },
+  // Generic words: only used when nothing more specific matched.
+  { candidates: ["015", "014", "022"], words: ["insurans", "insurance"],
+    note: "Life/takaful: 015. Education or medical insurance: 014. General insurance (car, fire, etc.): 022. Confirm with LHDN." },
+  { candidates: ["018", "028", "022"], words: ["sewa", "sewaan", "rent", "rental"],
+    note: "Renting premises/land: 018. Renting a vehicle: 028. Renting equipment or other things: 022. Confirm with LHDN." },
+  { candidates: ["010", "002", "013"], words: ["yuran"],
+    note: "Tuition/course: 010. Kindergarten/childcare: 002. Gym: 013 (sports fees: 038; anything else: 022). Confirm with LHDN." },
 ];
 
-export function suggestClassification(description = "") {
-  const d = description.toLowerCase();
-  for (const [code, words] of CODE_KEYWORDS) {
-    if (words.some((w) => d.includes(w))) return code;
+// Words that describe a TAX, not the item. Classification codes don't cover these.
+const TAX_WORDS = [
+  ["02", ["service tax", "cukai perkhidmatan"]],
+  ["01", ["sales tax", "cukai jualan"]],
+  ["03", ["tourism tax", "cukai pelancongan"]],
+  ["04", ["high value goods tax"]],
+];
+
+// Full answer: { code, candidates, confident, keyword, note, taxType }
+export function classify(description = "") {
+  const d = normalize(description);
+  let best = null;
+  CODE_RULES.forEach((rule, order) => {
+    const hits = rule.words.filter((w) => hasPhrase(d, w));
+    if (!hits.length) return;
+    const keyword = hits.reduce((a, b) => (normalize(b).split(" ").length > normalize(a).split(" ").length ? b : a));
+    const len = normalize(keyword).trim().split(" ").length;
+    if (!best || len > best.len) best = { rule, keyword, len, order };
+  });
+  const tax = TAX_WORDS.find(([, ws]) => ws.some((w) => hasPhrase(d, w)));
+  const taxType = tax ? tax[0] : null;
+  const taxNote = taxType ? `"${description}" is a tax, not an item: use tax type ${taxType}. Pick the classification code from what you are selling.` : null;
+  if (!best) {
+    return { code: "022", candidates: ["022"], confident: false, keyword: null, taxType,
+      note: taxNote || "No keyword matched, so 022 Others is the fallback. Check the full list or confirm with LHDN." };
   }
-  return "022"; // Others
+  const { rule, keyword } = best;
+  if (rule.candidates) {
+    return { code: rule.candidates[0], candidates: rule.candidates, confident: false, keyword, taxType, note: [rule.note, taxNote].filter(Boolean).join(" ") };
+  }
+  return { code: rule.code, candidates: [rule.code], confident: true, keyword, taxType, note: taxNote };
+}
+
+// Single best code (first candidate when unclear). Kept for callers that need one code.
+export function suggestClassification(description = "") {
+  return classify(description).code;
 }
 
 // TIN: individual IG + digits; non-individual prefixes C, CS, D, E, F, FA, PT, TA, TC, TN, TR, TP, J, LE + digits

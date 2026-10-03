@@ -82,7 +82,8 @@ export function buildServer() {
     _meta: ui("Looking up codes…", "Codes found"),
   }, async (args) => {
     const r = lookupCodes(args);
-    return { structuredContent: r, content: [{ type: "text", text: `Suggested ${r.suggested?.code} ${r.suggested?.description}. Matches: ${r.matches.slice(0, 8).map((m) => m.code + " " + m.description).join("; ")}` }] };
+    const head = r.suggested ? `Suggested ${r.suggested.code} ${r.suggested.description}.` : "Unclear — top candidates (confirm with LHDN):";
+    return { structuredContent: r, content: [{ type: "text", text: `${head} ${r.note ? r.note + " " : ""}Matches: ${r.matches.slice(0, 8).map((m) => m.code + " " + m.description).join("; ")}` }] };
   });
 
   return server;

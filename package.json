@@ -5,7 +5,7 @@
   "scripts": {
     "build": "node build.js",
     "start": "node build.js && node src/server.js",
-    "test": "node test.mjs"
+    "test": "node --test tests/*.test.mjs"
   },
   "keywords": [],
   "author": "Mohamed Azman bin Mohamed Taufik",
