@@ -17,13 +17,15 @@ All tools are read-only. Nothing is sent to LHDN — it drafts and checks only.
 ```
 npm install
 npm start          # builds dist/widget.html, serves http://localhost:8787/mcp
-node test.mjs      # calls all 3 tools via an MCP client
+node test.mjs      # calls all 3 tools via an MCP client (server must be running)
+npm test           # unit tests: HTTP layer + rules (walk-in/foreign/B2B buyers, general TINs, tax types, 30 keyword queries)
 ```
 
 ## Rules baked in (as of Oct 2026 — re-check before launch)
 
 - Exempt below RM1m turnover (raised from RM500k on 6 Dec 2025). Phase 4 (RM1m–5m) started 1 Jan 2026.
 - Any single transaction ≥ RM10,000 needs its own e-invoice from 1 Jan 2026.
+- Walk-in buyer: name "General Public", TIN EI00000000010, ID/SST/address/contact "NA" (LHDN e-Invoice Specific Guideline, Appendix 2).
 - General TINs: EI00000000010 (public), …020 (foreign buyer), …030 (foreign supplier), …040 (government).
 - SST: service tax 8% (6% for F&B, telco, parking, logistics); sales tax 10% / 5%.
 - 45 classification codes and 7 tax type codes from the LHDN MyInvois SDK.

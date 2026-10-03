@@ -1,6 +1,8 @@
 // MyInvois Helper — MCP server for ChatGPT (Apps SDK / MCP Apps) and other MCP hosts.
 import express from "express";
+import rateLimit from "express-rate-limit";
 import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -9,6 +11,7 @@ import { checkObligation, draftInvoice, lookupCodes } from "./logic.js";
 
 const WIDGET_URI = "ui://myinvois-helper/view-v1.html";
 const WIDGET_HTML = readFileSync(new URL("../dist/widget.html", import.meta.url), "utf8");
+const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 const ui = (invoking, invoked) => ({
   ui: { resourceUri: WIDGET_URI },
@@ -90,8 +93,14 @@ export function buildServer() {
 }
 
 // ---- HTTP (stateless Streamable HTTP) ----
-const app = express();
-app.use(express.json({ limit: "1mb" }));
+export const app = express();
+// Render sits behind one proxy: take the client IP from the last X-Forwarded-For hop it added.
+app.set("trust proxy", 1);
+
+// Cheap liveness probe: registered first so it skips body parsing, logging and rate limits.
+app.get("/health", (_req, res) => res.json({ status: "ok", version: VERSION }));
+
+app.use(express.json({ limit: "100kb" }));
 app.use((req, res, next) => {
   res.on("finish", () => {
     const line = `${new Date().toISOString()} ${req.method} ${req.originalUrl} -> ${res.statusCode} auth=${req.headers.authorization ? "yes" : "no"} rpc=${req.body && req.body.method ? req.body.method : ""}\n`;
@@ -104,7 +113,7 @@ app.use((req, res, next) => { res.setHeader("Access-Control-Allow-Origin", "*");
 // ---- Auto-approve OAuth shim ----
 // Some hosts (e.g. Claude custom connectors) insist on an OAuth handshake.
 // This tool holds no user data, so we approve every request instantly.
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: false, limit: "100kb" }));
 const base = (req) => `${req.get("x-forwarded-proto") || req.protocol}://${req.get("x-forwarded-host") || req.get("host")}`;
 const rid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 const protectedResource = (req, res) => res.json({ resource: base(req) + "/mcp", authorization_servers: [base(req)], bearer_methods_supported: ["header"] });
@@ -136,6 +145,23 @@ app.post("/token", (_req, res) => {
   res.json({ access_token: "at_" + rid(), token_type: "Bearer", expires_in: 60 * 60 * 24 * 30, refresh_token: "rt_" + rid(), scope: "mcp" });
 });
 app.get("/", (_req, res) => res.type("text/plain").send("MyInvois Helper MCP server. Endpoint: /mcp"));
+
+// ---- Rate limits on /mcp ----
+// Claude's servers share IPs, so the per-IP backstop is loose; the per-session limit does the real work.
+const tooMany = (kind) => (req, res, _next, options) => {
+  const key = kind === "session" ? req.get("mcp-session-id") : req.ip;
+  process.stdout.write(`${new Date().toISOString()} 429 rate-limit ${kind}=${key}\n`);
+  res.status(options.statusCode).json({ jsonrpc: "2.0", error: { code: -32000, message: "Too many requests, please wait a minute and try again." }, id: null });
+};
+const ipLimiter = rateLimit({ windowMs: 60_000, limit: 600, standardHeaders: "draft-7", handler: tooMany("ip") });
+const sessionLimiter = rateLimit({
+  windowMs: 60_000, limit: 60, standardHeaders: "draft-7",
+  skip: (req) => !req.get("mcp-session-id"),
+  keyGenerator: (req) => "sid:" + req.get("mcp-session-id"),
+  handler: tooMany("session"),
+});
+app.use("/mcp", ipLimiter, sessionLimiter);
+
 app.post("/mcp", async (req, res) => {
   const server = buildServer();
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
@@ -145,5 +171,14 @@ app.post("/mcp", async (req, res) => {
 });
 app.all("/mcp", (_req, res) => res.status(405).json({ jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed" }, id: null }));
 
-const PORT = process.env.PORT || 8787;
-app.listen(PORT, () => console.log(`MyInvois Helper listening on :${PORT}/mcp`));
+// Oversized bodies (>100kb) and malformed JSON get a short JSON-RPC error instead of an HTML page.
+app.use((err, _req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = err.status || err.statusCode || 500;
+  res.status(status).json({ jsonrpc: "2.0", error: { code: -32000, message: status === 413 ? "Request too large" : status < 500 ? "Bad request" : "Internal error" }, id: null });
+});
+
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const PORT = process.env.PORT || 8787;
+  app.listen(PORT, () => console.log(`MyInvois Helper listening on :${PORT}/mcp`));
+}
