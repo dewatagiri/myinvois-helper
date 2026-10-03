@@ -1,6 +1,12 @@
 // Malaysia e-Invoice (LHDN MyInvois) reference data and rules.
-// Sources checked Oct 2026: LHDN MyInvois SDK code lists (via L&CO / ClearTax mirrors),
-// malaysia4u.com e-invoicing + SST guides, jomeinvoice.my RM10k rule guide.
+// Last verified: 2026-10-03
+// - TAX_TYPES: https://sdk.myinvois.hasil.gov.my/codes/tax-types/
+// - CLASSIFICATION_CODES (001-045): https://sdk.myinvois.hasil.gov.my/codes/classification-codes/ (page dated 25 Sep 2026)
+// - Code list index: https://sdk.myinvois.hasil.gov.my/codes/
+// - GENERAL_TINS: from Thomson Reuters / Pagero docs and LHDN SDK release notes —
+//   pending check against LHDN e-Invoice Specific Guideline (https://www.hasil.gov.my/en/e-invoice/)
+// Phases, thresholds and SST rates: malaysia4u.com e-invoicing + SST guides, jomeinvoice.my RM10k rule guide
+// (not yet checked against LHDN).
 // Rules change. Every output tells the user to confirm on https://www.hasil.gov.my/en/e-invoice/
 
 export const RULES_AS_OF = "2026-10";
@@ -25,10 +31,10 @@ export const EXEMPTION_THRESHOLD = 1_000_000; // raised from RM500k on 6 Dec 202
 export const SINGLE_TXN_LIMIT = 10_000; // from 1 Jan 2026: any single txn >= RM10k needs its own e-invoice
 
 export const GENERAL_TINS = {
-  EI00000000010: "General public (local buyer with no TIN / consolidated B2C)",
-  EI00000000020: "Foreign buyer",
-  EI00000000030: "Foreign supplier (self-billed)",
-  EI00000000040: "Government / statutory body buyer",
+  EI00000000010: "General public (Malaysian buyer/seller with no TIN; consolidated)",
+  EI00000000020: "Foreign buyer / foreign shipping recipient",
+  EI00000000030: "Foreign supplier",
+  EI00000000040: "Buyer is government or local authority",
 };
 
 // Industries that cannot use consolidated e-invoices even for B2C
@@ -46,7 +52,7 @@ export const TAX_TYPES = {
   "04": "High-Value Goods Tax",
   "05": "Sales Tax on Low Value Goods",
   "06": "Not Applicable",
-  E: "Tax exemption",
+  E: "Tax exemption (where applicable)",
 };
 
 // Common SST rates (Malaysia, after 1 Jul 2025 changes)
