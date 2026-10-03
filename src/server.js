@@ -31,7 +31,7 @@ const ui = (invoking, invoked) => ({
   "openai/toolInvocation/invoked": invoked,
 });
 // All tools only compute and return text; none changes or deletes anything, so no destructiveHint.
-const readOnly = { readOnlyHint: true, openWorldHint: false, idempotentHint: true };
+const readOnly = (title) => ({ title, readOnlyHint: true, openWorldHint: false, idempotentHint: true });
 
 export function buildServer() {
   const server = new McpServer({ name: "myinvois-helper", version: VERSION });
@@ -50,7 +50,7 @@ export function buildServer() {
       industry: z.string().optional().describe("Industry, e.g. 'F&B', 'car dealer', 'IT services'"),
       sstRegistered: z.boolean().optional().describe("True if registered for SST"),
     },
-    annotations: readOnly,
+    annotations: readOnly("Check Malaysia e-Invoice obligation"),
     _meta: ui("Checking e-invoice rules…", "Obligation checked"),
   }, async (args) => {
     const r = checkObligation(args);
@@ -82,7 +82,7 @@ export function buildServer() {
       })).optional(),
       notes: z.string().optional(),
     },
-    annotations: readOnly,
+    annotations: readOnly("Draft Malaysia e-Invoice (MyInvois-ready)"),
     _meta: ui("Drafting e-invoice…", "e-Invoice draft ready"),
   }, async (args) => {
     const r = draftInvoice(args);
@@ -94,7 +94,7 @@ export function buildServer() {
     title: "Find LHDN e-Invoice classification code",
     description: "Finds the LHDN e-invoice classification code (001–045) for a product or service described in plain words, or looks up a code by its number, and returns the tax type codes (01–06, E) with a tax type hint where one applies. Use when someone asks which classification code or tax type to use for an item. Reference lookup only; it does not submit anything to LHDN.",
     inputSchema: { query: z.string().describe("Item or service, e.g. 'laptop', 'car repair', 'tuition'") },
-    annotations: readOnly,
+    annotations: readOnly("Find LHDN e-Invoice classification code"),
     _meta: ui("Looking up codes…", "Codes found"),
   }, async (args) => {
     const r = lookupCodes(args);
