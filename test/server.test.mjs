@@ -1,7 +1,7 @@
 // Unit tests for the HTTP layer: rate limits, body cap and /health. Run with `npm test`.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { app, ALLOWED_ORIGINS } from "../src/server.js";
+import { app, ALLOWED_ORIGINS, logSink } from "../src/server.js";
 
 let server, base;
 before(async () => {
@@ -150,4 +150,40 @@ test("oversized body: 413 message gives the 100 KB limit", async () => {
   const r = await rpc({ method: "tools/list", params: { pad: "x".repeat(110_000) } });
   assert.equal(r.status, 413);
   assert.match((await r.json()).error.message, /under 100 KB/);
+});
+
+// ---- Privacy: log lines hold only time, function called and status ----
+test("log lines never contain an IP address, session ID, header value, query string or request content", async () => {
+  const lines = [];
+  const original = logSink.write;
+  logSink.write = (l) => { lines.push(l); };
+  const secretSession = "sess-SECRET-4f2a9c";
+  const mykad = "900101145678";
+  try {
+    // Normal traffic with a session ID, an Authorization header, a query string and personal data in the body.
+    for (let i = 0; i < 62; i++) { // 61st+ request on one session hits the rate limit (429)
+      const r = await rpc({ method: "tools/call", params: { name: "draft_einvoice", arguments: { buyer: { name: "Ahmad bin Ali", brn: mykad, phone: "0123456789" }, items: [{ description: "Laptop", unitPrice: 100 }] } } },
+        { "mcp-session-id": secretSession, authorization: "Bearer SECRET-TOKEN-123", "x-forwarded-for": "203.0.113.77" });
+      await r.arrayBuffer();
+    }
+    await (await fetch(base + "/mcp?token=SECRET-QUERY&ic=" + mykad, { method: "GET", headers: { "mcp-session-id": secretSession } })).arrayBuffer();
+    await (await fetch(base + "/authorize?redirect_uri=https://evil.example/cb&state=SECRET-STATE", { redirect: "manual" })).arrayBuffer();
+    await (await rpc("{bad json " + mykad)).arrayBuffer();
+    await (await rpc({ method: "tools/list\nFORGED LINE 203.0.113.9" })).arrayBuffer();
+    await new Promise((r) => setTimeout(r, 100)); // the log line is written just after the response is sent
+  } finally {
+    logSink.write = original;
+  }
+  assert.ok(lines.length >= 66, `expected a log line per request, got ${lines.length}`);
+  assert.ok(lines.some((l) => / -> 429\n$/.test(l)), "the rate-limited request is still logged as 429");
+  const all = lines.join("");
+  for (const forbidden of [secretSession, "SECRET-TOKEN", "SECRET-QUERY", "SECRET-STATE", "evil.example", mykad, "0123456789", "Ahmad", "203.0.113", "auth=", "rate-limit", "FORGED"]) {
+    assert.ok(!all.includes(forbidden), `log output must not contain "${forbidden}"`);
+  }
+  assert.ok(!/\b\d{1,3}(\.\d{1,3}){3}\b/.test(all), "no IPv4 address in logs");
+  assert.ok(!/(^|[\s:])[0-9a-f]{0,4}(:[0-9a-f]{0,4}){2,7}(\s|$)/i.test(all.replace(/\d{2}:\d{2}:\d{2}\.\d{3}Z/g, "")), "no IPv6 address in logs");
+  assert.ok(!/::ffff|127\.0\.0\.1|::1\b/.test(all), "no loopback/mapped address in logs");
+  // Every line is exactly: ISO time, function called, "->", status.
+  for (const l of lines) assert.match(l, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z [\x20-\x7E]+ -> \d{3}\n$/, `unexpected log format: ${JSON.stringify(l)}`);
+  assert.ok(lines.some((l) => l.includes(" tools/call -> 200")), "function called is logged for tool calls");
 });

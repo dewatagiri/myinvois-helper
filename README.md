@@ -76,4 +76,4 @@ Some hosts insist on an OAuth handshake. `src/server.js` includes an auto-approv
 
 ## Privacy
 
-No invoice data is stored. Logs record only the time, request path, status and MCP method name — never invoice contents.
+No invoice data is stored. Each log line holds only the time, the function called (the MCP method, or the HTTP method and path) and the response status — never IP addresses, session IDs, sign-in details, query strings or invoice contents. Rate-limit counters live in memory only and are never logged.

@@ -15,6 +15,11 @@ import { checkObligation, draftInvoice, lookupCodes } from "./logic.js";
 // To support another host (e.g. ChatGPT in a browser), add its exact origin here.
 export const ALLOWED_ORIGINS = ["https://claude.ai", "https://claude.com"];
 
+// Log output goes through this sink so tests can capture it. Privacy rule: a log line holds ONLY
+// the time, the function called and the response status — never an IP address, session ID,
+// header value, query string or request content. Keep PRIVACY.md in step with this.
+export const logSink = { write: (line) => process.stdout.write(line) };
+
 const WIDGET_URI = "ui://myinvois-helper/view-v1.html";
 const WIDGET_HTML = readFileSync(new URL("../dist/widget.html", import.meta.url), "utf8");
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
@@ -116,14 +121,18 @@ app.use((req, res, next) => {
 // Cheap liveness probe: registered first so it skips body parsing, logging and rate limits.
 app.get("/health", (_req, res) => res.json({ status: "ok", version: VERSION }));
 
-app.use(express.json({ limit: "100kb" }));
+// Request log. Registered before body parsing so unreadable or oversized requests are logged too.
 app.use((req, res, next) => {
+  const path = req.path; // read now: Express shortens req.path inside mounted middleware such as the rate limiter
   res.on("finish", () => {
-    const line = `${new Date().toISOString()} ${req.method} ${req.originalUrl} -> ${res.statusCode} auth=${req.headers.authorization ? "yes" : "no"} rpc=${req.body && req.body.method ? req.body.method : ""}\n`;
-    process.stdout.write(line);
+    // Function called: the MCP method (e.g. tools/call) if it looks like one, else the HTTP method and path (no query string).
+    const rpcMethod = path === "/mcp" && req.body && typeof req.body.method === "string" && /^[A-Za-z0-9_./-]{1,64}$/.test(req.body.method) ? req.body.method : null;
+    const fn = rpcMethod || `${req.method} ${path}`.replace(/[^\x20-\x7E]/g, "?").slice(0, 100);
+    logSink.write(`${new Date().toISOString()} ${fn} -> ${res.statusCode}\n`);
   });
   next();
 });
+app.use(express.json({ limit: "100kb" }));
 app.use((req, res, next) => { res.setHeader("Access-Control-Allow-Origin", "*"); res.setHeader("Access-Control-Allow-Headers", "*"); res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id"); if (req.method === "OPTIONS") return res.sendStatus(204); next(); });
 
 // ---- Auto-approve OAuth shim ----
@@ -164,17 +173,16 @@ app.get("/", (_req, res) => res.type("text/plain").send("MyInvois Helper MCP ser
 
 // ---- Rate limits on /mcp ----
 // Claude's servers share IPs, so the per-IP backstop is loose; the per-session limit does the real work.
-const tooMany = (kind) => (req, res, _next, options) => {
-  const key = kind === "session" ? req.get("mcp-session-id") : req.ip;
-  process.stdout.write(`${new Date().toISOString()} 429 rate-limit ${kind}=${key}\n`);
+// Counters live in memory only and are never logged (the normal request log line above already records the 429).
+const tooMany = () => (_req, res, _next, options) => {
   res.status(options.statusCode).json({ jsonrpc: "2.0", error: { code: -32000, message: "Too many requests, please wait a minute and try again." }, id: null });
 };
-const ipLimiter = rateLimit({ windowMs: 60_000, limit: 600, standardHeaders: "draft-7", handler: tooMany("ip") });
+const ipLimiter = rateLimit({ windowMs: 60_000, limit: 600, standardHeaders: "draft-7", handler: tooMany() });
 const sessionLimiter = rateLimit({
   windowMs: 60_000, limit: 60, standardHeaders: "draft-7",
   skip: (req) => !req.get("mcp-session-id"),
   keyGenerator: (req) => "sid:" + req.get("mcp-session-id"),
-  handler: tooMany("session"),
+  handler: tooMany(),
 });
 app.use("/mcp", ipLimiter, sessionLimiter);
 
