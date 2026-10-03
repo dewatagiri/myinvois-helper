@@ -143,7 +143,8 @@ export function lookupCodes({ query = "" }) {
   const q = query.toLowerCase().trim();
   const all = Object.entries(CLASSIFICATION_CODES).map(([code, desc]) => ({ code, description: desc }));
   const matches = q ? all.filter((x) => x.code === q || x.description.toLowerCase().includes(q)) : [];
-  const suggested = q ? suggestClassification(q) : null;
+  let suggested = q ? suggestClassification(q) : null;
+  if (suggested === "022" && matches.length) suggested = null; // a real match beats "Others"
   return {
     query,
     matches: matches.length ? matches : (suggested && suggested !== "022" ? [{ code: suggested, description: CLASSIFICATION_CODES[suggested] }] : all),

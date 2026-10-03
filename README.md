@@ -37,6 +37,19 @@ Sources disagree on when the Phase 4 relaxation ends (31 Dec 2027 vs mid-2026), 
 - `src/server.js` — MCP server (Streamable HTTP, stateless)
 - `widget/` — inline UI; `build.js` bundles it into `dist/widget.html`
 
+## Use it in Claude
+
+1. Claude → Settings → Connectors → **Add custom connector**.
+2. URL: `https://myinvois-helper.onrender.com/mcp` → **Add** → **Connect** (approval is automatic; no account needed).
+3. In a chat, switch MyInvois Helper on and ask, for example:
+   - "Do I need to issue e-invoices? My company makes RM2.5 million a year, F&B, walk-in customers."
+   - "Draft an e-invoice for ABC Logistics: car repair labour RM450, 2 brake pads RM120 each at 10% sales tax."
+   - "Which LHDN classification code should I use for tuition fees?"
+
+Free hosting sleeps when idle — the first request after a quiet spell can take up to a minute.
+
+Support: pintuniaga.official@gmail.com · Privacy policy: [PRIVACY.md](PRIVACY.md)
+
 ## Deploy (Render, free)
 
 1. Push this repo to GitHub.
