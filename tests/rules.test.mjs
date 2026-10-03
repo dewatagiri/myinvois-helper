@@ -2,7 +2,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { draftInvoice, lookupCodes, checkObligation, blockedIndustry, isWalkIn } from "../src/logic.js";
-import { GENERAL_TINS, TAX_TYPES, checkTin, classify } from "../src/rules.js";
+import { GENERAL_TINS, TAX_TYPES, checkTin, classify, generalTinFor, idKind, GOVERNMENT_BUYER_CATEGORIES, ID_TIN_ONLY } from "../src/rules.js";
 
 const SUPPLIER = { name: "Kedai Maju Sdn Bhd", tin: "C2584563201", brn: "202001012345", msic: "47910", activity: "Retail", address: "Kajang, Selangor", phone: "0123456789", sstNo: "W10-1808-32000001" };
 const ITEM = { description: "Laptop", unitPrice: 100 };
@@ -224,5 +224,148 @@ describe("check_einvoice_obligation industry keywords", () => {
     assert.ok(a.actions.some((x) => /cannot use consolidated/.test(x)));
     const b = checkObligation({ annualTurnoverRM: 3_000_000, sellsToConsumers: true, industry: "bengkel kereta" });
     assert.ok(b.actions.some((x) => /EI00000000010/.test(x)));
+  });
+});
+
+describe("general TINs — LHDN Specific Guideline v4.9, Appendix 1", () => {
+  // Item 2: EI00000000010
+  for (const idType of ["mykad", "mytentera"]) {
+    for (const role of ["buyer", "supplier", "shippingRecipient"]) {
+      test(`010: Malaysian ${role} with only ${idType} -> EI00000000010, ID kept`, () => {
+        const g = generalTinFor(role, { idType, id: "900101145678" });
+        assert.equal(g.tin, "EI00000000010");
+        assert.equal(g.id, "900101145678");
+      });
+    }
+  }
+  for (const idType of ["mypr", "mykas"]) {
+    test(`010: non-Malaysian individual with only ${idType} -> EI00000000010, NOT EI00000000020`, () => {
+      const g = generalTinFor("buyer", { idType, id: "850505105555" });
+      assert.equal(g.tin, "EI00000000010");
+      assert.notEqual(g.tin, "EI00000000020");
+      assert.equal(g.id, "850505105555");
+      assert.match(g.rule, /MyPR\/MyKAS/);
+    });
+  }
+  test("010: consolidated e-invoice buyer -> EI00000000010 with ID NA", () => {
+    assert.deepEqual(generalTinFor("buyer", { consolidated: true }), { tin: "EI00000000010", id: "NA", rule: "Buyer on a consolidated e-Invoice" });
+  });
+  test("010: consolidated self-billed e-invoice supplier -> EI00000000010", () => {
+    assert.equal(generalTinFor("supplier", { consolidated: true, selfBilled: true }).tin, "EI00000000010");
+  });
+  test("010 in the draft tool: buyer with only a 12-digit MyPR/MyKAS number gets 010, ID in the ID field", () => {
+    const r = draft({ name: "Li Wei", brn: "850505-10-5555", address: "Penang" });
+    assert.equal(r.invoice.buyer.tin, "EI00000000010");
+    assert.equal(r.invoice.buyer.brn, "850505-10-5555");
+    assert.match(issue(r, "buyer.tin", "info").msg, /MyPR\/MyKAS/);
+  });
+  test("010 vs 020: a 12-digit MyPR/MyKAS number with EI00000000020 is an error", () => {
+    const r = draft({ name: "Li Wei", tin: "EI00000000020", brn: "850505105555", address: "Penang" });
+    assert.match(issue(r, "buyer.tin", "error").msg, /EI00000000010, not EI00000000020/);
+  });
+
+  // Item 3: EI00000000020
+  test("020: passport-only buyer -> EI00000000020, passport in ID field", () => {
+    const g = generalTinFor("buyer", { id: "A12345678" });
+    assert.equal(g.tin, "EI00000000020");
+    assert.equal(g.id, "A12345678");
+  });
+  test("020 in the draft tool: buyer with only a passport and no TIN gets 020", () => {
+    const r = draft({ name: "John Smith", brn: "A12345678", address: "Singapore" });
+    assert.equal(r.invoice.buyer.tin, "EI00000000020");
+    assert.equal(r.invoice.buyer.brn, "A12345678");
+  });
+  test("020: passport ID with EI00000000010 is flagged", () => {
+    const r = draft({ name: "John Smith", tin: "EI00000000010", brn: "A12345678", address: "Singapore" });
+    assert.match(issue(r, "buyer.tin", "warn").msg, /EI00000000020/);
+  });
+  test("020: export, foreign buyer's TIN not available -> EI00000000020, BRN NA", () => {
+    assert.deepEqual(generalTinFor("buyer", { export: true }), { tin: "EI00000000020", id: "NA", rule: "Export: foreign buyer's TIN not available" });
+  });
+  test("020: foreign shipping recipient without TIN -> EI00000000020", () => {
+    assert.equal(generalTinFor("shippingRecipient", { foreign: true }).tin, "EI00000000020");
+  });
+  test("020 in the draft tool: foreign buyer without registration number -> ID NA", () => {
+    const r = draft({ name: "Acme Pte Ltd", tin: "EI00000000020", address: "Singapore" });
+    assert.equal(r.invoice.buyer.brn, "NA");
+  });
+
+  // Item 4: EI00000000030 (self-billed only)
+  test("030: passport-only supplier on a self-billed e-invoice -> EI00000000030", () => {
+    const g = generalTinFor("supplier", { id: "E1234567X", selfBilled: true });
+    assert.equal(g.tin, "EI00000000030");
+    assert.equal(g.id, "E1234567X");
+  });
+  test("030: passport-only supplier on a normal invoice -> no general TIN", () => {
+    assert.equal(generalTinFor("supplier", { idType: "passport" }).tin, null);
+  });
+  test("030: import, foreign supplier's TIN not available -> EI00000000030, BRN NA", () => {
+    assert.deepEqual(generalTinFor("supplier", { import: true }), { tin: "EI00000000030", id: "NA", rule: "Import: foreign supplier's TIN not available (self-billed)" });
+  });
+  test("030 is never for a buyer", () => {
+    assert.equal(generalTinFor("buyer", { idType: "passport" }).tin, "EI00000000020");
+  });
+  test("030 as supplier in the draft tool (a normal invoice) is an error", () => {
+    const r = draft({ name: "X", tin: "C1234567890", brn: "201901000123", address: "Y" }, [ITEM], { ...SUPPLIER, tin: "EI00000000030" });
+    assert.match(issue(r, "supplier.tin", "error").msg, /SELF-BILLED/);
+  });
+
+  // Item 5: EI00000000040
+  test("040 lists exactly the six buyer categories", () => {
+    assert.deepEqual(GOVERNMENT_BUYER_CATEGORIES, [
+      "Government", "State government and state authority", "Exempt institution not assigned a TIN",
+      "Government authority", "Local authority", "Statutory authority and statutory body",
+    ]);
+    for (const w of ["Government;", "state government and state authority", "exempt institutions not assigned a TIN", "government authority", "local authority", "statutory authority and statutory body"]) {
+      assert.ok(GENERAL_TINS.EI00000000040.includes(w), w);
+    }
+  });
+  for (const category of GOVERNMENT_BUYER_CATEGORIES) {
+    test(`040: buyer category "${category}" -> EI00000000040`, () => {
+      assert.equal(generalTinFor("buyer", { governmentCategory: category }).tin, "EI00000000040");
+    });
+  }
+  test("040 is buyer-only: as supplier it is an error", () => {
+    const r = draft({ name: "X", tin: "C1234567890", brn: "201901000123", address: "Y" }, [ITEM], { ...SUPPLIER, tin: "EI00000000040" });
+    assert.ok(issue(r, "supplier.tin", "error"));
+  });
+
+  // Item 6: ID fill-ins
+  test("individual buyer who gives only a TIN -> ID 000000000000", () => {
+    const r = draft({ name: "Ahmad bin Ali", tin: "IG12345678901", address: "Kajang" });
+    assert.equal(r.invoice.buyer.brn, ID_TIN_ONLY);
+    assert.equal(ID_TIN_ONLY, "000000000000");
+    assert.equal(issue(r, "buyer.brn", "warn"), undefined);
+  });
+  test("individual supplier who gives only a TIN -> ID 000000000000, no BRN error", () => {
+    const r = draft({ name: "ABC", tin: "C1234567890", brn: "201901000123", address: "Y" }, [ITEM], { ...SUPPLIER, tin: "IG12345678901", brn: "" });
+    assert.equal(r.invoice.supplier.brn, "000000000000");
+    assert.equal(issue(r, "supplier.brn", "error"), undefined);
+  });
+  test("a company with no BRN is not given 000000000000", () => {
+    const r = draft({ name: "ABC Sdn Bhd", tin: "C1234567890", address: "Y" });
+    assert.equal(r.invoice.buyer.brn, undefined);
+    assert.ok(issue(r, "buyer.brn", "warn"));
+  });
+  test("consolidated / walk-in buyer: General Public, ID/address/contact/SST NA", () => {
+    const b = draft({ name: "Walk-in" }).invoice.buyer;
+    assert.deepEqual([b.name, b.tin, b.brn, b.address, b.phone, b.sstNo], ["General Public", "EI00000000010", "NA", "NA", "NA", "NA"]);
+  });
+
+  test("ID kinds", () => {
+    assert.equal(idKind("900101-14-5678"), "nric");
+    assert.equal(idKind("A12345678"), "passport");
+    assert.equal(idKind("E1234567X"), "passport");
+    assert.equal(idKind("NA"), "na");
+    assert.equal(idKind(""), "none");
+    assert.equal(idKind("123456-A"), "other");
+  });
+  test("no source reference to v4.8 and no 'still to check' note remains", async () => {
+    const { readFile } = await import("node:fs/promises");
+    for (const f of ["src/rules.js", "src/logic.js", "README.md"]) {
+      const t = await readFile(new URL("../" + f, import.meta.url), "utf8");
+      assert.ok(!/v4\.8/.test(t), f + " still mentions v4.8");
+      assert.ok(!/still to check/i.test(t), f + " still has a 'still to check' note");
+    }
   });
 });
