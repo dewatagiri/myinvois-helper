@@ -29,7 +29,7 @@ Test prompts:
 
 Submit from the OpenAI Platform dashboard (apps/plugins submission). Expect to need: verified developer identity, public MCP URL, privacy policy URL, support email, test prompts with expected results, screenshots. Note: Render free tier sleeps after idle — upgrade to a paid instance (~USD 7/month) before submitting so reviewers don't hit a cold start.
 
-Privacy policy one-liner (host on the PintuNiaga site): "MyInvois Helper does not store invoice data. Inputs are processed in memory to return a draft. Invoice contents are never logged, sold or shared; server logs record only request time, path and status."
+Privacy policy one-liner (host on the PintuNiaga site): "MyInvois Helper does not store invoice data. Inputs are processed in memory to return a draft. Invoice contents are never logged, sold or shared; server logs record only request time, the function called and the response status (no IP addresses or session IDs). Render, our host, may keep its own standard logs under its own privacy policy."
 
 ## 4. Listing copy (SEO — bottom-of-funnel keywords)
 
