@@ -3,8 +3,8 @@
 // - TAX_TYPES: https://sdk.myinvois.hasil.gov.my/codes/tax-types/
 // - CLASSIFICATION_CODES (001-045): https://sdk.myinvois.hasil.gov.my/codes/classification-codes/ (page dated 25 Sep 2026)
 // - Code list index: https://sdk.myinvois.hasil.gov.my/codes/
-// - GENERAL_TINS: from Thomson Reuters / Pagero docs and LHDN SDK release notes —
-//   pending check against LHDN e-Invoice Specific Guideline (https://www.hasil.gov.my/en/e-invoice/)
+// - GENERAL_TINS: e-Invoice Specific Guideline v4.8, Appendix 1 (per secondary sources; LHDN PDF still to check)
+//   (https://www.hasil.gov.my/en/e-invoice/)
 // Phases, thresholds and SST rates: malaysia4u.com e-invoicing + SST guides, jomeinvoice.my RM10k rule guide
 // (not yet checked against LHDN).
 // Rules change. Every output tells the user to confirm on https://www.hasil.gov.my/en/e-invoice/
@@ -31,10 +31,10 @@ export const EXEMPTION_THRESHOLD = 1_000_000; // raised from RM500k on 6 Dec 202
 export const SINGLE_TXN_LIMIT = 10_000; // from 1 Jan 2026: any single txn >= RM10k needs its own e-invoice
 
 export const GENERAL_TINS = {
-  EI00000000010: "General public (Malaysian buyer/seller with no TIN; consolidated)",
-  EI00000000020: "Foreign buyer / foreign shipping recipient",
-  EI00000000030: "Foreign supplier",
-  EI00000000040: "Buyer is government or local authority",
+  EI00000000010: "General public: Malaysian individual who gives only MyKad/MyTentera; buyer's TIN on a consolidated e-Invoice; supplier's TIN on a consolidated self-billed e-Invoice",
+  EI00000000020: "Foreign buyer / shipping recipient: non-Malaysian individual with only passport/MyPR/MyKAS; export buyer or foreign shipping recipient whose TIN is unavailable",
+  EI00000000030: "Foreign supplier: foreign supplier whose TIN is unavailable (mainly self-billed)",
+  EI00000000040: "Government / authority buyer: government, state government or state authority, government authority, local authority, statutory authority or statutory body, and exempt institutions without a TIN",
 };
 
 // Industries that cannot use consolidated e-invoices even for B2C
