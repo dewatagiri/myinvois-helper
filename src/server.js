@@ -9,6 +9,12 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { registerAppTool, registerAppResource, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { checkObligation, draftInvoice, lookupCodes } from "./logic.js";
 
+// Browser origins allowed to call this server. A request that carries an Origin header not in this list
+// gets 403 (protects against DNS-rebinding / cross-site calls). Requests with NO Origin header
+// (server-to-server, e.g. Claude's connector backend or curl) are always allowed.
+// To support another host (e.g. ChatGPT in a browser), add its exact origin here.
+export const ALLOWED_ORIGINS = ["https://claude.ai", "https://claude.com"];
+
 const WIDGET_URI = "ui://myinvois-helper/view-v1.html";
 const WIDGET_HTML = readFileSync(new URL("../dist/widget.html", import.meta.url), "utf8");
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
@@ -19,10 +25,11 @@ const ui = (invoking, invoked) => ({
   "openai/toolInvocation/invoking": invoking,
   "openai/toolInvocation/invoked": invoked,
 });
-const readOnly = { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true };
+// All tools only compute and return text; none changes or deletes anything, so no destructiveHint.
+const readOnly = { readOnlyHint: true, openWorldHint: false, idempotentHint: true };
 
 export function buildServer() {
-  const server = new McpServer({ name: "myinvois-helper", version: "1.0.0" });
+  const server = new McpServer({ name: "myinvois-helper", version: VERSION });
 
   registerAppResource(server, "MyInvois Helper view", WIDGET_URI, { description: "Invoice preview and e-invoice checklist" }, async () => ({
     contents: [{ uri: WIDGET_URI, mimeType: RESOURCE_MIME_TYPE, text: WIDGET_HTML,
@@ -31,7 +38,7 @@ export function buildServer() {
 
   registerAppTool(server, "check_einvoice_obligation", {
     title: "Check Malaysia e-Invoice obligation",
-    description: "Use when a Malaysian business owner asks whether they must issue LHDN e-invoices (MyInvois), which phase or deadline applies, whether they are exempt, or whether they can use consolidated e-invoices. Takes annual turnover in RM.",
+    description: "Checks whether a Malaysian business must issue LHDN e-invoices (MyInvois) from its annual turnover in RM: which implementation phase and start date apply, whether it is exempt (turnover below RM1 million), and whether it may use monthly consolidated e-invoices for walk-in sales given its industry and the RM10,000 single-transaction rule. Use when someone asks if, or from when, their business needs e-invoicing. Returns guidance only; it does not submit anything to LHDN or connect to MyInvois.",
     inputSchema: {
       annualTurnoverRM: z.number().nonnegative().describe("Annual turnover / revenue in Malaysian Ringgit"),
       sellsToConsumers: z.boolean().optional().describe("True if the business sells to walk-in / retail consumers (B2C)"),
@@ -54,7 +61,7 @@ export function buildServer() {
   // TODO: add optional id_type and invoice_type inputs after directory review.
   registerAppTool(server, "draft_einvoice", {
     title: "Draft Malaysia e-Invoice (MyInvois-ready)",
-    description: "Use when the user wants to create, prepare or check an invoice for Malaysia's LHDN e-Invoice / MyInvois system. Builds the invoice with SST (sales tax / service tax) totals, suggests classification codes, and lists missing mandatory fields (TIN, BRN, MSIC, SST no.). Does not submit to LHDN.",
+    description: "Builds a draft standard (not self-billed) Malaysian e-invoice from supplier, buyer and line-item details: calculates SST (sales tax / service tax) and totals, suggests an LHDN classification code for items without one, fills in the general TIN and ID placeholders the LHDN e-Invoice Specific Guideline allows (e.g. a walk-in buyer becomes \"General Public\", EI00000000010), and lists missing or invalid mandatory fields (TIN, BRN/ID, MSIC, address, phone). Use when someone wants to prepare or check an invoice for MyInvois. The draft is for review only; it does not submit anything to LHDN or MyInvois.",
     inputSchema: {
       invoiceNo: z.string().optional(),
       issueDate: z.string().optional().describe("YYYY-MM-DD"),
@@ -80,7 +87,7 @@ export function buildServer() {
 
   registerAppTool(server, "lookup_classification_code", {
     title: "Find LHDN e-Invoice classification code",
-    description: "Use when the user asks which LHDN e-invoice classification code (001–045) or tax type code to use for a product or service.",
+    description: "Finds the LHDN e-invoice classification code (001–045) for a product or service described in plain words, or looks up a code by its number, and returns the tax type codes (01–06, E) with a tax type hint where one applies. Use when someone asks which classification code or tax type to use for an item. Reference lookup only; it does not submit anything to LHDN.",
     inputSchema: { query: z.string().describe("Item or service, e.g. 'laptop', 'car repair', 'tuition'") },
     annotations: readOnly,
     _meta: ui("Looking up codes…", "Codes found"),
@@ -97,6 +104,14 @@ export function buildServer() {
 export const app = express();
 // Render sits behind one proxy: take the client IP from the last X-Forwarded-For hop it added.
 app.set("trust proxy", 1);
+
+// Origin check runs before everything else (see ALLOWED_ORIGINS above).
+app.use((req, res, next) => {
+  const origin = req.get("origin");
+  if (origin === undefined || ALLOWED_ORIGINS.includes(origin.toLowerCase())) return next();
+  res.status(403).json({ jsonrpc: "2.0", error: { code: -32000,
+    message: `Forbidden origin "${origin}". Browser requests are accepted only from ${ALLOWED_ORIGINS.join(" or ")}; server-to-server requests without an Origin header are allowed.` }, id: null });
+});
 
 // Cheap liveness probe: registered first so it skips body parsing, logging and rate limits.
 app.get("/health", (_req, res) => res.json({ status: "ok", version: VERSION }));
@@ -170,13 +185,23 @@ app.post("/mcp", async (req, res) => {
   await server.connect(transport);
   await transport.handleRequest(req, res, req.body);
 });
-app.all("/mcp", (_req, res) => res.status(405).json({ jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed" }, id: null }));
+app.all("/mcp", (req, res) => res.status(405).set("Allow", "POST").json({ jsonrpc: "2.0", error: { code: -32000,
+  message: `${req.method} /mcp is not supported. This is a stateless MCP server: send JSON-RPC 2.0 requests with POST /mcp (Content-Type: application/json, Accept: application/json, text/event-stream).` }, id: null }));
 
-// Oversized bodies (>100kb) and malformed JSON get a short JSON-RPC error instead of an HTML page.
+// Unknown paths: JSON 404 that names the real endpoints, instead of Express's HTML page.
+app.use((req, res) => res.status(404).json({ jsonrpc: "2.0", error: { code: -32000,
+  message: `Not found: ${req.method} ${req.path}. The MCP endpoint is POST /mcp; the health check is GET /health.` }, id: null }));
+
+// Oversized bodies (>100kb), malformed JSON and unexpected failures get a specific JSON-RPC error, never an HTML page.
 app.use((err, _req, res, next) => {
   if (res.headersSent) return next(err);
   const status = err.status || err.statusCode || 500;
-  res.status(status).json({ jsonrpc: "2.0", error: { code: -32000, message: status === 413 ? "Request too large" : status < 500 ? "Bad request" : "Internal error" }, id: null });
+  let code = -32000, message;
+  if (err.type === "entity.too.large" || status === 413) message = "Request too large: the request body must be under 100 KB.";
+  else if (err.type === "entity.parse.failed") { code = -32700; message = `Parse error: the request body is not valid JSON (${err.message}). Send a JSON-RPC 2.0 object with Content-Type: application/json.`; }
+  else if (status < 500) message = `Bad request: ${err.message || "the request could not be read"}. Send a JSON-RPC 2.0 object to POST /mcp with Content-Type: application/json.`;
+  else message = "Internal error: the server failed while handling this request. Please retry; if it keeps failing, contact pintuniaga.official@gmail.com.";
+  res.status(status).json({ jsonrpc: "2.0", error: { code, message }, id: null });
 });
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
