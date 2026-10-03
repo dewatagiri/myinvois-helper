@@ -1,6 +1,6 @@
 {
   "name": "myinvois-helper",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "ChatGPT / Claude plugin (MCP app) for Malaysian LHDN e-invoicing: draft invoices, SST totals, MyInvois readiness checks.",
   "scripts": {
     "build": "node build.js",
