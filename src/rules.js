@@ -226,6 +226,14 @@ const CODE_RULES = [
   { candidates: ["022", "037"], words: ["komisen", "komisyen", "commission"],
     note: "Commission you RECEIVE (you invoice the payer): usually 022 Others. Commission you PAY to agents/dealers: 037 self-billed. Confirm with LHDN." },
   { code: "022", words: ["team building", "insurans kereta", "insurans motor", "car insurance", "motor insurance", "general insurance", "insurans am", "service charge", "caj perkhidmatan"] },
+  // Professional / IT / design services have no dedicated LHDN code: 022 Others is the correct answer.
+  { code: "022", words: ["web design", "website design", "web development", "website development", "web developer", "web hosting", "website", "app development",
+    "software development", "software", "mobile app", "system development", "it consulting", "it consultancy", "it support", "it service", "it services",
+    "graphic design", "logo design", "ui design", "ux design", "branding", "seo", "digital marketing", "social media management", "content creation",
+    "copywriting", "video editing", "photography", "videography", "consulting", "consultancy", "consultation", "professional service", "professional services",
+    "advisory", "accounting service", "bookkeeping", "audit", "legal service", "translation", "design service", "design services",
+    "reka bentuk web", "reka bentuk laman web", "pembangunan web", "pembangunan laman web", "pembangunan perisian", "perisian", "perundingan", "perkhidmatan profesional",
+    "pembuatan laman web", "laman web"] },
   { code: "029", words: ["ev charging", "ev charger", "pengecas ev", "caj ev"] },
   { code: "030", words: ["repair", "maintenance", "servicing", "servis", "baiki", "membaiki", "pembaikan", "penyelenggaraan", "selenggara", "overhaul",
     "car service", "aircond service", "aircon service", "service aircond", "service aircon", "service kereta", "tukar minyak hitam"] },
@@ -298,6 +306,14 @@ export function suggestClassification(description = "") {
 }
 
 // TIN: individual IG + digits; non-individual prefixes C, CS, D, E, F, FA, PT, TA, TC, TN, TR, TP, J, LE + digits
+// Business-looking buyer names: a business must supply its own TIN, never the general public TIN.
+const BUSINESS_WORDS = ["sdn bhd", "sdn", "bhd", "berhad", "enterprise", "enterprises", "trading", "plt", "llp", "holdings", "industries", "resources",
+  "corporation", "corp", "company", "co", "ltd", "limited", "inc", "pte", "restoran", "kedai", "syarikat", "perniagaan", "koperasi", "persatuan", "yayasan"];
+export function looksLikeBusiness(name = "") {
+  const d = normalize(name);
+  return BUSINESS_WORDS.some((w) => hasPhrase(d, w));
+}
+
 export function checkTin(tin) {
   if (!tin) return { ok: false, msg: "TIN missing" };
   const t = String(tin).trim().toUpperCase();

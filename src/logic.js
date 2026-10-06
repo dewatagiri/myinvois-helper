@@ -1,7 +1,7 @@
 import {
   PHASES, EXEMPTION_THRESHOLD, SINGLE_TXN_LIMIT, NO_CONSOLIDATION_INDUSTRIES,
   CLASSIFICATION_CODES, TAX_TYPES, SST_HINTS, GENERAL_TINS, OFFICIAL_LINKS, RULES_AS_OF,
-  GENERAL_PUBLIC_BUYER, ID_TIN_ONLY, ID_NOT_AVAILABLE, idKind, generalTinFor, classify, normalize, hasPhrase, checkTin,
+  GENERAL_PUBLIC_BUYER, ID_TIN_ONLY, ID_NOT_AVAILABLE, idKind, generalTinFor, classify, normalize, hasPhrase, checkTin, looksLikeBusiness,
 } from "./rules.js";
 
 const rm = (n) => "RM" + Number(n).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -130,9 +130,9 @@ export function draftInvoice(input) {
     const kind = idKind(id);
     if (!tin) {
       const g = generalTinFor("buyer", { id });
-      if (kind === "company") {
-        // An SSM number, not a birth-date ID: never give a business the general public TIN.
-        add("warn", "buyer.tin", "Malaysian businesses must provide their TIN and business registration number. This ID looks like an SSM registration number, so EI00000000010 was not applied — get the buyer's TIN.");
+      if (kind === "company" || looksLikeBusiness(buyer.name)) {
+        // A business must give its own TIN: never apply the general public TIN to it.
+        add("error", "buyer.tin", `Malaysian businesses must provide their TIN and business registration number. ${kind === "company" ? "This ID looks like an SSM registration number" : `"${buyer.name}" looks like a business`}, so the general public TIN EI00000000010 was not applied — ask the buyer for its TIN.`);
       } else if (g.tin === "EI00000000010") {
         tin = g.tin;
         add("info", "buyer.tin", "Individual buyer gave only a 12-digit MyKad/MyTentera/MyPR/MyKAS number — using general TIN EI00000000010 with that number in the ID field (Specific Guideline v4.9, Table 3.3 / Table 10.2).");
@@ -250,6 +250,7 @@ export function lookupCodes({ query = "" }) {
   } else {
     candidates = [entry("022")];
     suggested = entry("022");
+    note = `No keyword matched "${q}", so 022 Others is the fallback (LHDN has no dedicated code for most services). If it is goods or a specific item, browse the full list at the source link or confirm with LHDN.`;
   }
 
   return {
@@ -258,7 +259,7 @@ export function lookupCodes({ query = "" }) {
     candidates,
     confident,
     note,
-    matches: g.keyword || direct.length ? candidates : all,
+    matches: candidates,
     taxTypeHint: g.taxType ? { code: g.taxType, name: TAX_TYPES[g.taxType] } : null,
     taxTypes: TAX_TYPES,
     source: OFFICIAL_LINKS.sdkCodes,
