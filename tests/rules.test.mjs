@@ -78,8 +78,16 @@ describe("normal B2B buyer", () => {
   test("bad TIN is an error", () => {
     assert.ok(issue(draft({ ...b2b, tin: "12345" }), "buyer.tin", "error"));
   });
-  test("named buyer without TIN gets the general TIN and a warning", () => {
-    const r = draft({ name: "ABC Sdn Bhd", address: "KL" });
+  test("business buyer without TIN is an error, not the general TIN", () => {
+    for (const name of ["ABC Sdn Bhd", "XYZ Enterprise", "Maju Trading", "Kedai Ali"]) {
+      const r = draft({ name, address: "KL" });
+      assert.notEqual(r.invoice.buyer.tin, "EI00000000010");
+      assert.equal(issue(r, "buyer.tin").level, "error");
+      assert.equal(r.readiness.ready, false);
+    }
+  });
+  test("named individual buyer without TIN or ID still gets the general TIN with a warning", () => {
+    const r = draft({ name: "Ahmad bin Ali", address: "KL" });
     assert.equal(r.invoice.buyer.tin, "EI00000000010");
     assert.equal(issue(r, "buyer.tin").level, "warn");
   });
@@ -142,6 +150,11 @@ describe("tax types", () => {
 const QUERIES = [
   ["servis kereta", "030"],
   ["service tax", "022", "02"],
+  ["web design", "022"],
+  ["Website development services", "022"],
+  ["IT consulting", "022"],
+  ["graphic design", "022"],
+  ["reka bentuk web", "022"],
   ["servis aircond rumah", "030"],
   ["repair laptop", "030"],
   ["beli laptop baru", "003"],
@@ -173,7 +186,7 @@ const QUERIES = [
 ];
 
 describe("lookup_classification_code keyword queries", () => {
-  assert.equal(QUERIES.length, 30);
+  assert.equal(QUERIES.length, 35);
   for (const [query, expected, tax] of QUERIES) {
     test(`"${query}" -> ${Array.isArray(expected) ? "unclear: " + expected.join("/") : expected}${tax ? " + tax " + tax : ""}`, () => {
       const r = lookupCodes({ query });
@@ -196,6 +209,10 @@ describe("lookup_classification_code keyword queries", () => {
   });
   test("empty query lists all 45 codes", () => {
     assert.equal(lookupCodes({ query: "" }).matches.length, 45);
+    // a query with no keyword hit must not dump the whole list
+    const none = lookupCodes({ query: "zzz widget" });
+    assert.deepEqual(none.matches.map((m) => m.code), ["022"]);
+    assert.equal(lookupCodes({ query: "web design" }).suggested.code, "022");
   });
   test("draft_einvoice uses the same matching and flags unclear items", () => {
     const r = draft({}, [{ description: "Sewa", unitPrice: 500 }, { description: "Baucar makan", unitPrice: 50 }]);
@@ -388,12 +405,12 @@ describe("12-digit ID: individual (MyKad/MyTentera/MyPR/MyKAS) vs SSM company nu
   });
 
   // c. company number + no TIN -> no EI00000000010, warn
-  test("c: buyer with an SSM number and no TIN does NOT get EI00000000010 and is warned", () => {
+  test("c: buyer with an SSM number and no TIN does NOT get EI00000000010 and is an error", () => {
     const r = draft({ name: "ABC Trading Sdn Bhd", brn: "202001012345", address: "Shah Alam" });
     assert.notEqual(r.invoice.buyer.tin, "EI00000000010");
     assert.equal(r.invoice.buyer.tin, "");
     assert.equal(r.invoice.buyer.brn, "202001012345");
-    assert.match(issue(r, "buyer.tin", "warn").msg, /^Malaysian businesses must provide their TIN and business registration number\./);
+    assert.match(issue(r, "buyer.tin", "error").msg, /^Malaysian businesses must provide their TIN and business registration number\./);
   });
   test("c: generalTinFor gives no general TIN for an SSM number", () => {
     const g = generalTinFor("buyer", { id: "201901000123" });
